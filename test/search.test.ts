@@ -45,6 +45,27 @@ describe("hybrid search", () => {
     expect(results[0]?.path).toBe("/events/aggregate-projections.md");
   });
 
+  test("path terms participate in candidate retrieval", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/projections/advanced-mapping.md",
+        title: "Advanced Mapping",
+        raw: `# Advanced Mapping\n\nThis section focuses on internals.`
+      },
+      {
+        path: "/documents/querying.md",
+        title: "Querying",
+        raw: `# Querying\n\nGeneral query docs.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const results = index.search("events projections", 5, "auto");
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]?.path).toBe("/events/projections/advanced-mapping.md");
+  });
+
   test("read context stays within same heading section when possible", () => {
     const chunks = chunkPages([
       {
