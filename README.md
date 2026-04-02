@@ -138,9 +138,9 @@ Optional ranking weight tuning (env vars):
   "mcpServers": {
     "marten-docs": {
       "command": "bun",
-      "args": ["run", "/Users/stijn/repositories/personal/marten_mcp/src/index.ts"],
+      "args": ["run", "src/index.ts"],
       "env": {
-        "MARTEN_MCP_CACHE_DIR": "/Users/stijn/.cache/marten-docs-mcp"
+        "MARTEN_MCP_CACHE_DIR": "~/.cache/marten-docs-mcp"
       }
     }
   }
@@ -154,7 +154,7 @@ If you prefer Node runtime from built files:
   "mcpServers": {
     "marten-docs": {
       "command": "node",
-      "args": ["/Users/stijn/repositories/personal/marten_mcp/dist/index.js"]
+      "args": ["dist/index.js"]
     }
   }
 }
@@ -208,6 +208,8 @@ bun run smoke
 bun run smoke "aggregate projections"
 # markdown output
 bun run smoke --markdown "aggregate projections"
+# run smoke against built Node runtime
+bun run smoke -- --server node-dist "aggregate projections"
 ```
 
 Current tests verify:
@@ -261,7 +263,7 @@ Flow 4: human-readable output for interactive troubleshooting
 ```json
 {
   "sourceUrl": "https://martendb.io/llms-full.txt",
-  "cachePath": "/Users/stijn/.cache/marten-docs-mcp",
+  "cachePath": "~/.cache/marten-docs-mcp",
   "hasCache": true,
   "freshness": {
     "state": "fresh",
@@ -332,9 +334,3 @@ Flow 4: human-readable output for interactive troubleshooting
 - GitHub Actions workflow: `.github/workflows/ci.yml`.
 - Bun job gates: `bun test`, `bun run build`, `bun run smoke`.
 - Node compatibility job gates: `bun run build` + smoke against `node dist/index.js` via `bun run smoke -- --server node-dist`.
-
-## Next improvements
-
-1. Add lightweight persisted index snapshot (JSON) to speed startup on large corpora.
-2. Improve parser robustness for alternate `llms-full.txt` marker variants.
-3. Add a small integration test that mocks fetch responses for 200/304/network-failure revalidation paths.
