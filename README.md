@@ -32,6 +32,7 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 ├── scripts
 │   ├── doctor.ts
 │   ├── eval.ts
+│   ├── migrate-to-sqlite.ts
 │   ├── perf-smoke.ts
 │   └── smoke.ts
 ├── tsconfig.json
@@ -194,6 +195,12 @@ Run environment and cache diagnostics:
 bun run doctor
 # machine-readable output
 bun run doctor --json
+```
+
+Migrate existing JSON cache files to sqlite:
+
+```bash
+bun run migrate:sqlite
 ```
 
 Run perf smoke metrics:
