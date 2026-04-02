@@ -6,6 +6,8 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-02
+
 ### Added
 - Stale-while-revalidate startup behavior with background revalidation.
 - Revalidation backoff with jitter and persisted validation failure history.
