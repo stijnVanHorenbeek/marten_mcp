@@ -10,6 +10,33 @@ RUNTIME="${MARTEN_MCP_RUNTIME:-auto}"
 STORAGE="${MARTEN_MCP_STORAGE_MODE:-auto}"
 TAG="${MARTEN_MCP_VERSION:-}"
 
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "Missing value for --version" >&2
+        exit 1
+      fi
+      TAG="$1"
+      ;;
+    --repo)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "Missing value for --repo" >&2
+        exit 1
+      fi
+      REPO="$1"
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      echo "Supported: --version <vX.Y.Z>, --repo <owner/repo>" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
@@ -22,7 +49,7 @@ require_cmd tar
 require_cmd mktemp
 
 if [ -z "$TAG" ]; then
-  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p;q')
+  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | awk -F'"' '/"tag_name"/ {print $4; exit}')
 fi
 
 if [ -z "$TAG" ]; then
