@@ -6,9 +6,15 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-03
+
+### Added
+- Example OpenCode Marten skill at `examples/skills/martendb/SKILL.md`.
+
 ### Fixed
 - Quick installer now prints an OpenCode-compatible `mcp` config snippet (`type: local`, `command` array, `environment`).
 - Quick installer now supports `--client copilot` and prints a `mcpServers` snippet compatible with GitHub Copilot Chat config.
+- `search_docs` markdown output now includes chunk `id` for easier follow-up `read_section`/`read_context` calls.
 
 ## [0.2.1] - 2026-04-02
 
