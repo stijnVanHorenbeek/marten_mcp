@@ -10,12 +10,20 @@ The format is based on Keep a Changelog.
 - Stale-while-revalidate startup behavior with background revalidation.
 - Revalidation backoff with jitter and persisted validation failure history.
 - Cache index snapshot reuse for faster warm starts.
+- Runtime-inferred storage mode (`sqlite` on Bun, `json` on Node by default).
+- SQLite cache backend using a single-file DB.
+- Persisted postings/index state hydration for faster warm starts.
+- JSON-to-sqlite migration command (`bun run migrate:sqlite`).
 - Structured stderr logging with event ids and context.
 - `doctor` diagnostics script for cache and network checks.
+- `perf:smoke` metrics script.
 
 ### Changed
 - Search quality improvements including BM25 lexical scoring and better token normalization.
 - MCP ergonomics additions: `list_pages`, `search_docs` offset paging, `read_context` mode, markdown format.
+- Bundling moved to Bun (`Bun.build`) with minified distributable output.
+- Node sqlite runtime path uses Node 22+ `node:sqlite`.
+- CI now validates bundled artifact smoke tests on Bun and Node runtimes.
 
 ## [0.1.0] - 2026-04-02
 

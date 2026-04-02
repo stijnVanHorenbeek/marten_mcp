@@ -6,7 +6,7 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 
 - Protocol: MCP over stdio (`stdin`/`stdout`), logging to `stderr`
 - Logging: structured JSON stderr records with `eventId`, `level`, timestamp, and optional context
-- Runtime: Bun for local development, Node-compatible output via `tsc`
+- Runtime: Bun for local development, Node 22+ runtime support
 - Storage: runtime-inferred by default (`sqlite` on Bun, `json` on Node) with env override
 - Freshness model: soft TTL (12h), hard TTL (7d), conditional HTTP revalidation (`ETag`, `Last-Modified`)
 - Revalidation resilience: exponential backoff with jitter after failed validations (stale cache stays available)
@@ -29,7 +29,6 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 │   ├── baseline.json
 │   └── queries.json
 ├── package.json
-├── ROADMAP.md
 ├── scripts
 │   ├── bundle.ts
 │   ├── doctor.ts
@@ -252,8 +251,10 @@ bun run smoke
 bun run smoke "aggregate projections"
 # markdown output
 bun run smoke --markdown "aggregate projections"
-# run smoke against built Node runtime
-bun run smoke -- --server node-dist "aggregate projections"
+# run smoke against bundled runtime in Bun
+bun run smoke -- --server bun-bundle "aggregate projections"
+# run smoke against bundled runtime in Node
+bun run smoke -- --server node-bundle "aggregate projections"
 ```
 
 Current tests verify:
@@ -363,10 +364,11 @@ Flow 4: human-readable output for interactive troubleshooting
 
 ## Troubleshooting
 
-- Cache reset: remove cache files (`llms-full.txt`, `metadata.json`, `validation-history.json`, `index-snapshot.json`) from `MARTEN_MCP_CACHE_DIR` and run `refresh_docs(force=true)`.
+- Cache reset: remove files under `MARTEN_MCP_CACHE_DIR` (`llms-full.txt`, `metadata.json`, `validation-history.json`, `index-snapshot.json`, `cache.db`) and run `refresh_docs(force=true)`.
 - Stale fallback visible: check `get_status().freshness.lastValidationError`, `validationBackoff`, and `validationFailureHistory`.
 - Parser issues: inspect `get_status().index.parseDiagnostics` for `mode`, `pageMarkerCount`, `malformedMarkerCount`, and warnings.
 - Connectivity check: run `bun run doctor` to verify source reachability and cache path writability.
+- Node sqlite mode requires Node 22+ (`node:sqlite`).
 
 ## Release notes process
 
@@ -377,5 +379,5 @@ Flow 4: human-readable output for interactive troubleshooting
 ## CI
 
 - GitHub Actions workflow: `.github/workflows/ci.yml`.
-- Bun job gates: `bun test`, `bun run build`, `bun run smoke`.
-- Node compatibility job gates: `bun run build` + smoke against `node dist/index.js` via `bun run smoke -- --server node-dist`.
+- Bun job gates: `bun test`, `bun run build:bundle`, smoke against bundled runtime (`bun-bundle`).
+- Node compatibility job gates: `bun run build:bundle`, smoke against bundled runtime (`node-bundle`) with sqlite mode.
