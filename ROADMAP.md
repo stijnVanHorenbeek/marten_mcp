@@ -50,7 +50,7 @@ Goal: Keep behavior stable under flaky network and repeated runs.
 Goal: Make local operation and debugging straightforward.
 
 - [x] Add structured stderr logging (event ids + context)
-- [ ] Add `doctor` command/script for cache path, permissions, and fetch checks
+- [x] Add `doctor` command/script for cache path, permissions, and fetch checks
 - [ ] Add CI for Bun + Node (test, build, smoke)
 - [ ] Add release notes/changelog process
 - [ ] Add troubleshooting section (cache reset, stale fallback, parser diagnostics)

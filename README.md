@@ -160,6 +160,14 @@ Run tests:
 bun test
 ```
 
+Run environment and cache diagnostics:
+
+```bash
+bun run doctor
+# machine-readable output
+bun run doctor --json
+```
+
 Run retrieval evaluation baseline checks:
 
 ```bash
