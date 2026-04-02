@@ -18,6 +18,10 @@
     "doctor": "bun run scripts/doctor.ts",
     "perf:smoke": "bun run scripts/perf-smoke.ts",
     "migrate:sqlite": "bun run scripts/migrate-to-sqlite.ts",
+    "install:local": "bun run scripts/install.ts",
+    "uninstall:local": "bun run scripts/uninstall.ts",
+    "upgrade:local": "bun run scripts/upgrade.ts",
+    "verify:local": "bun run scripts/verify.ts",
     "eval": "bun run scripts/eval.ts",
     "eval:record": "bun run scripts/eval.ts --record"
   },

@@ -31,6 +31,14 @@ jobs:
           MARTEN_MCP_SQLITE_DRIVER: bun-sqlite
         run: bun run smoke -- --server bun-bundle "aggregate projections"
 
+      - name: Lifecycle scripts (install/verify/upgrade/uninstall)
+        run: |
+          TMP_ROOT=$(mktemp -d)
+          bun run install:local -- --install-dir "$TMP_ROOT/install" --bin-dir "$TMP_ROOT/bin" --cache-dir "$TMP_ROOT/cache"
+          bun run verify:local -- --install-dir "$TMP_ROOT/install" --bin-dir "$TMP_ROOT/bin"
+          bun run upgrade:local -- --install-dir "$TMP_ROOT/install" --bin-dir "$TMP_ROOT/bin"
+          bun run uninstall:local -- --install-dir "$TMP_ROOT/install" --bin-dir "$TMP_ROOT/bin" --cache-dir "$TMP_ROOT/cache" --purge-cache
+
   node:
     name: Node Build Smoke
     runs-on: ubuntu-latest
