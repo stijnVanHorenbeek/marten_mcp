@@ -14,6 +14,7 @@ async function main(): Promise<void> {
     command: launch.command,
     args: launch.args,
     cwd: process.cwd(),
+    env: toStringEnv(process.env),
     stderr: "pipe"
   });
 
@@ -124,4 +125,14 @@ function resolveServerLaunch(mode: string): { command: string; args: string[] } 
     command: "bun",
     args: ["run", "src/index.ts"]
   };
+}
+
+function toStringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === "string") {
+      out[key] = value;
+    }
+  }
+  return out;
 }
