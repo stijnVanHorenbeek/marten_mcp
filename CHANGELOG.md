@@ -17,6 +17,9 @@ The format is based on Keep a Changelog.
 - Structured stderr logging with event ids and context.
 - `doctor` diagnostics script for cache and network checks.
 - `perf:smoke` metrics script.
+- Install lifecycle scripts: `install.ts`, `verify.ts`, `upgrade.ts`, `uninstall.ts`.
+- POSIX lifecycle wrapper (`lifecycle.sh`) for install/verify/upgrade/uninstall commands.
+- `quickinstall.sh` script for one-command install from GitHub release artifacts.
 - Tag-triggered GitHub release workflow with packaged `bundle/` and `dist/` artifacts.
 
 ### Changed

@@ -1,5 +1,21 @@
 # Marten Docs MCP Server
 
+## Quick install
+
+Install from the latest GitHub release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh
+```
+
+Install a specific version:
+
+```bash
+MARTEN_MCP_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh
+```
+
+This installs the launcher and prints an MCP config snippet you can paste into your client config.
+
 ## Architecture summary
 
 This is a local MCP server that keeps a cached copy of `https://martendb.io/llms-full.txt`, chunks it structurally, builds an in-memory hybrid search index, and exposes focused retrieval tools over stdio.
@@ -34,9 +50,16 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 │   ├── bundle.ts
 │   ├── doctor.ts
 │   ├── eval.ts
+│   ├── install.ts
+│   ├── lifecycle-lib.ts
+│   ├── lifecycle.sh
 │   ├── migrate-to-sqlite.ts
 │   ├── perf-smoke.ts
-│   └── smoke.ts
+│   ├── quickinstall.sh
+│   ├── smoke.ts
+│   ├── uninstall.ts
+│   ├── upgrade.ts
+│   └── verify.ts
 ├── tsconfig.json
 ├── src
 │   ├── cache.ts
@@ -100,6 +123,46 @@ Clean build/test artifacts:
 
 ```bash
 bun run clean
+```
+
+## Install lifecycle scripts
+
+Primary workflow (TS scripts):
+
+```bash
+bun run install:local
+bun run verify:local
+bun run upgrade:local
+bun run uninstall:local
+```
+
+POSIX wrappers (call TS scripts):
+
+```bash
+./scripts/lifecycle.sh install
+./scripts/lifecycle.sh verify
+./scripts/lifecycle.sh upgrade
+./scripts/lifecycle.sh uninstall
+```
+
+Install behavior:
+
+- Copies `bundle/index.js` into `${XDG_DATA_HOME:-~/.local/share}/marten-docs-mcp` by default.
+- Creates launcher `marten-docs-mcp` in bin dir priority order:
+  1. `--bin-dir`
+  2. `MARTEN_MCP_BIN_DIR`
+  3. `XDG_BIN_DIR`
+  4. `~/bin` (if available/creatable)
+  5. `~/.local/bin`
+- Prints an MCP config snippet by default.
+- Writes config file only when `--write-config` is provided.
+
+Installer path overrides:
+
+```bash
+MARTEN_MCP_INSTALL_DIR=/custom/install/root
+MARTEN_MCP_BIN_DIR=/custom/bin
+MARTEN_MCP_CACHE_DIR=/custom/cache
 ```
 
 ## MCP tools
