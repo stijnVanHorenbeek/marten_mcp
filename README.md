@@ -22,6 +22,15 @@ curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master
 
 This installs the launcher and prints an OpenCode `opencode.jsonc` snippet (`mcp` section) you can paste into your client config.
 
+## Example skill
+
+An example Marten skill file is included at:
+
+```text
+examples/skills/martendb/SKILL.md
+```
+
+
 ## Architecture summary
 
 This is a local MCP server that keeps a cached copy of `https://martendb.io/llms-full.txt`, chunks it structurally, builds an in-memory hybrid search index, and exposes focused retrieval tools over stdio.
@@ -51,6 +60,10 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 ├── eval
 │   ├── baseline.json
 │   └── queries.json
+├── examples
+│   └── skills
+│       └── martendb
+│           └── SKILL.md
 ├── package.json
 ├── scripts
 │   ├── bundle.ts

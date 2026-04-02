@@ -261,6 +261,7 @@ function renderSearchMarkdown(input: {
   for (const [index, row] of input.results.entries()) {
     lines.push(
       `${index + 1}. \`${row.path}\` (score ${row.score})`,
+      `   id: \`${row.id}\``,
       `   headings: ${row.headings.join(" > ") || "(none)"}`,
       `   snippet: ${row.snippet}`
     );
