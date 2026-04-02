@@ -24,7 +24,8 @@ export function resolveCachePaths(): CachePaths {
     dir: baseDir,
     docsFile: path.join(baseDir, "llms-full.txt"),
     metadataFile: path.join(baseDir, "metadata.json"),
-    validationHistoryFile: path.join(baseDir, "validation-history.json")
+    validationHistoryFile: path.join(baseDir, "validation-history.json"),
+    indexSnapshotFile: path.join(baseDir, "index-snapshot.json")
   };
 }
 

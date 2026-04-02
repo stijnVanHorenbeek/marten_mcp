@@ -75,6 +75,12 @@ describe("docs cache revalidation", () => {
     const persisted = await readMetadata();
     expect(persisted?.sha256).toBe(result.metadata.sha256);
     expect(persisted?.chunkCount).toBe(result.metadata.chunkCount);
+
+    const paths = resolveCachePaths();
+    const snapshotJson = await fs.readFile(paths.indexSnapshotFile, "utf8");
+    const snapshot = JSON.parse(snapshotJson) as { sourceSha256: string; chunks: unknown[] };
+    expect(snapshot.sourceSha256).toBe(result.metadata.sha256);
+    expect(snapshot.chunks.length).toBeGreaterThan(0);
   });
 
   test("revalidates stale cache with conditional headers (304)", async () => {
@@ -242,6 +248,35 @@ describe("docs cache revalidation", () => {
     const history = secondCache.getValidationFailureHistory();
     expect(history.length).toBeGreaterThan(0);
     expect(history[0]?.message).toContain("dns timeout");
+  });
+
+  test("tracks consecutive failures when force bypasses backoff", async () => {
+    let fetchStage = 0;
+    globalThis.fetch = (async () => {
+      fetchStage += 1;
+      if (fetchStage === 1) {
+        return new Response(SAMPLE_DOCS_V1, {
+          status: 200,
+          headers: {
+            etag: '"v1"',
+            "last-modified": "Wed, 01 Apr 2026 14:20:00 GMT"
+          }
+        });
+      }
+
+      throw new Error("socket reset");
+    }) as unknown as typeof fetch;
+
+    const cache = new DocsCache();
+    await cache.ensureReady();
+    await makeCacheStale();
+
+    await cache.ensureReady({ force: true });
+    await cache.ensureReady({ force: true });
+    const backoff = cache.getValidationBackoffStatus();
+
+    expect(backoff.consecutiveFailures).toBeGreaterThanOrEqual(2);
+    expect(backoff.active).toBe(true);
   });
 });
 

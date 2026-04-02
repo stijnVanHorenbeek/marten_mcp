@@ -15,6 +15,7 @@ export interface CachePaths {
   docsFile: string;
   metadataFile: string;
   validationHistoryFile: string;
+  indexSnapshotFile: string;
 }
 
 export interface PageDoc {

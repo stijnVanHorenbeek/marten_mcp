@@ -22,6 +22,15 @@ interface ValidationBackoffStatus {
   consecutiveFailures: number;
 }
 
+interface IndexSnapshot {
+  createdAt: string;
+  sourceSha256: string;
+  parserVersion: string;
+  indexVersion: string;
+  chunks: DocChunk[];
+  parseDiagnostics: ParseDiagnostics;
+}
+
 const BACKOFF_BASE_MS = 5 * 60 * 1000;
 const BACKOFF_MAX_MS = 6 * 60 * 60 * 1000;
 const BACKOFF_JITTER_RATIO = 0.2;
@@ -68,7 +77,7 @@ export class DocsCache {
     if (!options.force) {
       const freshness = computeFreshness(existingMeta);
       if (freshness.isFreshWithinSoftTtl) {
-        const { chunks, parseDiagnostics } = this.buildChunks(existingDocs);
+        const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
         return {
           metadata: existingMeta,
           rawDocs: existingDocs,
@@ -82,7 +91,7 @@ export class DocsCache {
 
       if (options.allowStaleWhileRevalidate === true) {
         const backoff = this.getValidationBackoffStatus();
-        const { chunks, parseDiagnostics } = this.buildChunks(existingDocs);
+        const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
         return {
           metadata: existingMeta,
           rawDocs: existingDocs,
@@ -95,7 +104,7 @@ export class DocsCache {
       }
 
       if (this.shouldSkipValidationDueToBackoff()) {
-        const { chunks, parseDiagnostics } = this.buildChunks(existingDocs);
+        const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
         return {
           metadata: existingMeta,
           rawDocs: existingDocs,
@@ -129,7 +138,7 @@ export class DocsCache {
         retryInSeconds: backoff.retryInSeconds
       });
 
-      const { chunks, parseDiagnostics } = this.buildChunks(existingDocs);
+      const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
       return {
         metadata: existingMeta,
         rawDocs: existingDocs,
@@ -249,7 +258,7 @@ export class DocsCache {
         lastValidatedAt: nowIso()
       };
       await this.writeMetadata(updatedMeta);
-      const { chunks, parseDiagnostics } = this.buildChunks(existingDocs);
+      const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(updatedMeta, existingDocs);
       return {
         metadata: updatedMeta,
         rawDocs: existingDocs,
@@ -274,7 +283,7 @@ export class DocsCache {
       };
       await this.writeMetadata(updatedMeta);
 
-      const { chunks, parseDiagnostics } = this.buildChunks(existingDocs);
+      const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(updatedMeta, existingDocs);
       return {
         metadata: updatedMeta,
         rawDocs: existingDocs,
@@ -319,6 +328,14 @@ export class DocsCache {
 
     await this.writeDocs(body);
     await this.writeMetadata(metadata);
+    await this.writeIndexSnapshot({
+      createdAt: now,
+      sourceSha256: metadata.sha256,
+      parserVersion: PARSER_VERSION,
+      indexVersion: INDEX_VERSION,
+      chunks,
+      parseDiagnostics
+    });
 
     return {
       metadata,
@@ -334,6 +351,53 @@ export class DocsCache {
       chunks: chunkPages(parsed.pages),
       parseDiagnostics: parsed.diagnostics
     };
+  }
+
+  private async buildChunksWithSnapshot(
+    metadata: CacheMetadata,
+    rawDocs: string
+  ): Promise<{ chunks: DocChunk[]; parseDiagnostics: ParseDiagnostics }> {
+    const rawSha = sha256(rawDocs);
+    if (rawSha !== metadata.sha256) {
+      logWarn("Cache docs hash mismatch; rebuilding chunks from docs", {
+        expectedSha: metadata.sha256,
+        actualSha: rawSha
+      });
+      const rebuilt = this.buildChunks(rawDocs);
+      await this.writeIndexSnapshot({
+        createdAt: nowIso(),
+        sourceSha256: rawSha,
+        parserVersion: PARSER_VERSION,
+        indexVersion: INDEX_VERSION,
+        chunks: rebuilt.chunks,
+        parseDiagnostics: rebuilt.parseDiagnostics
+      });
+      return rebuilt;
+    }
+
+    const snapshot = await this.readIndexSnapshot();
+    if (
+      snapshot &&
+      snapshot.sourceSha256 === metadata.sha256 &&
+      snapshot.parserVersion === PARSER_VERSION &&
+      snapshot.indexVersion === INDEX_VERSION
+    ) {
+      return {
+        chunks: snapshot.chunks,
+        parseDiagnostics: snapshot.parseDiagnostics
+      };
+    }
+
+    const rebuilt = this.buildChunks(rawDocs);
+    await this.writeIndexSnapshot({
+      createdAt: nowIso(),
+      sourceSha256: metadata.sha256,
+      parserVersion: PARSER_VERSION,
+      indexVersion: INDEX_VERSION,
+      chunks: rebuilt.chunks,
+      parseDiagnostics: rebuilt.parseDiagnostics
+    });
+    return rebuilt;
   }
 
   private async ensureCacheDir(): Promise<void> {
@@ -397,6 +461,30 @@ export class DocsCache {
   private async writeValidationHistory(history: ValidationFailureRecord[]): Promise<void> {
     const paths = resolveCachePaths();
     await fs.writeFile(paths.validationHistoryFile, `${JSON.stringify(history, null, 2)}\n`, "utf8");
+  }
+
+  private async readIndexSnapshot(): Promise<IndexSnapshot | null> {
+    const paths = resolveCachePaths();
+    try {
+      const json = await fs.readFile(paths.indexSnapshotFile, "utf8");
+      const parsed = JSON.parse(json) as IndexSnapshot;
+      if (!parsed || typeof parsed !== "object") {
+        return null;
+      }
+
+      if (!Array.isArray(parsed.chunks) || !parsed.parseDiagnostics) {
+        return null;
+      }
+
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeIndexSnapshot(snapshot: IndexSnapshot): Promise<void> {
+    const paths = resolveCachePaths();
+    await fs.writeFile(paths.indexSnapshotFile, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
   }
 }
 

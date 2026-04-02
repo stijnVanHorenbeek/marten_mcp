@@ -42,8 +42,8 @@ Goal: Keep behavior stable under flaky network and repeated runs.
 - [x] Add refresh lock to prevent concurrent refresh/index rebuild races
 - [x] Persist and report validation failure history (recent failures + timestamps)
 - [x] Serve cached index immediately and revalidate in background (stale-while-revalidate)
-- [ ] Add startup index snapshot load path (JSON) to speed warm start
-- [ ] Add tests for lock behavior and repeated failure scenarios
+- [x] Add startup index snapshot load path (JSON) to speed warm start
+- [x] Add tests for lock behavior and repeated failure scenarios
 
 ## Milestone 5: Observability and DX (v1.5)
 
