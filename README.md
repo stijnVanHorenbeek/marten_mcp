@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master
 Install a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh -s -- --version v0.2.0
+curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh -s -- --version v0.2.1
 ```
 
 This installs the launcher and prints an MCP config snippet you can paste into your client config.

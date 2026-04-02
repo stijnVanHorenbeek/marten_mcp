@@ -6,6 +6,13 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-02
+
+### Fixed
+- Quick installer now resolves latest release tag reliably from GitHub API.
+- Quick installer supports explicit version pinning via `--version`.
+- README quick install examples now use the supported pinned-version invocation.
+
 ## [0.2.0] - 2026-04-02
 
 ### Added
