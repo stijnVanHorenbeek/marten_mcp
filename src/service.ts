@@ -39,7 +39,7 @@ export class DocsService {
       const result = await this.cache.ensureReady({ force });
       this.metadata = result.metadata;
       this.parseDiagnostics = result.parseDiagnostics;
-      this.index = new HybridIndex(result.chunks);
+      this.index = result.indexState ? new HybridIndex(result.chunks, result.indexState) : new HybridIndex(result.chunks);
       const refreshed = beforeHash !== null ? beforeHash !== result.metadata.sha256 : true;
 
     return {
@@ -107,6 +107,7 @@ export class DocsService {
     return {
       sourceUrl: SOURCE_URL,
       cachePath: this.cache.getCachePath(),
+      storageMode: this.cache.getStorageMode(),
       hasCache,
       freshness: {
         state: freshnessState,
@@ -148,7 +149,7 @@ export class DocsService {
       const result = await this.cache.ensureReady({ force, allowStaleWhileRevalidate: !force });
       this.metadata = result.metadata;
       this.parseDiagnostics = result.parseDiagnostics;
-      this.index = new HybridIndex(result.chunks);
+      this.index = result.indexState ? new HybridIndex(result.chunks, result.indexState) : new HybridIndex(result.chunks);
       logInfo("Index ready", {
         chunkCount: result.chunks.length,
         staleFallback: result.usedStaleCacheDueToError

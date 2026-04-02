@@ -6,13 +6,15 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 
 - Protocol: MCP over stdio (`stdin`/`stdout`), logging to `stderr`
 - Logging: structured JSON stderr records with `eventId`, `level`, timestamp, and optional context
-- Runtime: Bun for local development, Node-compatible output via `tsc`
+- Runtime: Bun for local development, Node 22+ runtime support
+- Storage: runtime-inferred by default (`sqlite` on Bun, `json` on Node) with env override
 - Freshness model: soft TTL (12h), hard TTL (7d), conditional HTTP revalidation (`ETag`, `Last-Modified`)
 - Revalidation resilience: exponential backoff with jitter after failed validations (stale cache stays available)
 - Refresh safety: rebuild lock serializes concurrent refresh/index rebuild operations
 - Failure reporting: recent validation failures are persisted on disk and exposed in status
 - Startup behavior: stale cache is served immediately and stale entries are revalidated in background
 - Warm start speed: parser/chunk output snapshot is cached on disk and reused when hashes match
+- Index hydration: in-memory index can be hydrated from persisted postings snapshot (avoids retokenizing on startup)
 - Search model: BM25-style lexical scoring + trigram postings with query classification (`auto`, `lexical`, `trigram`, `exact`)
 
 ## File tree
@@ -27,10 +29,11 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 │   ├── baseline.json
 │   └── queries.json
 ├── package.json
-├── ROADMAP.md
 ├── scripts
+│   ├── bundle.ts
 │   ├── doctor.ts
 │   ├── eval.ts
+│   ├── migrate-to-sqlite.ts
 │   ├── perf-smoke.ts
 │   └── smoke.ts
 ├── tsconfig.json
@@ -43,6 +46,7 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 │   ├── mcpServer.ts
 │   ├── parser.ts
 │   ├── service.ts
+│   ├── storage.ts
 │   ├── types.ts
 │   └── util.ts
 └── test
@@ -66,6 +70,21 @@ Build Node-compatible JS:
 bun run build
 node dist/index.js
 ```
+
+Create a minified distributable bundle:
+
+```bash
+bun run build:bundle
+node bundle/index.js
+
+# full release build (tsc + bundle)
+bun run build:release
+```
+
+Notes:
+
+- The bundle intentionally keeps `bun:sqlite` and `node:sqlite` as runtime externals.
+- Node sqlite mode requires Node 22+ (`node:sqlite`).
 
 Clean build/test artifacts:
 
@@ -110,6 +129,24 @@ Override with:
 ```bash
 MARTEN_MCP_CACHE_DIR=/some/path
 ```
+
+Storage mode controls:
+
+```bash
+# force storage mode
+MARTEN_MCP_STORAGE_MODE=sqlite   # or json
+
+# sqlite db file path (only used in sqlite mode)
+MARTEN_MCP_SQLITE_PATH=~/.cache/marten-docs-mcp/cache.db
+
+# sqlite driver: auto | bun-sqlite | node-sqlite
+MARTEN_MCP_SQLITE_DRIVER=auto
+```
+
+Notes:
+
+- In Bun, sqlite mode uses Bun's sqlite driver automatically.
+- In Node (22+), sqlite mode uses `node:sqlite`; older Node should use json mode.
 
 Metadata contains:
 
@@ -176,6 +213,12 @@ bun run doctor
 bun run doctor --json
 ```
 
+Migrate existing JSON cache files to sqlite:
+
+```bash
+bun run migrate:sqlite
+```
+
 Run perf smoke metrics:
 
 ```bash
@@ -208,8 +251,10 @@ bun run smoke
 bun run smoke "aggregate projections"
 # markdown output
 bun run smoke --markdown "aggregate projections"
-# run smoke against built Node runtime
-bun run smoke -- --server node-dist "aggregate projections"
+# run smoke against bundled runtime in Bun
+bun run smoke -- --server bun-bundle "aggregate projections"
+# run smoke against bundled runtime in Node
+bun run smoke -- --server node-bundle "aggregate projections"
 ```
 
 Current tests verify:
@@ -263,7 +308,8 @@ Flow 4: human-readable output for interactive troubleshooting
 ```json
 {
   "sourceUrl": "https://martendb.io/llms-full.txt",
-  "cachePath": "~/.cache/marten-docs-mcp",
+  "storageMode": "sqlite",
+  "cachePath": "~/.cache/marten-docs-mcp/cache.db",
   "hasCache": true,
   "freshness": {
     "state": "fresh",
@@ -318,10 +364,11 @@ Flow 4: human-readable output for interactive troubleshooting
 
 ## Troubleshooting
 
-- Cache reset: remove cache files (`llms-full.txt`, `metadata.json`, `validation-history.json`, `index-snapshot.json`) from `MARTEN_MCP_CACHE_DIR` and run `refresh_docs(force=true)`.
+- Cache reset: remove files under `MARTEN_MCP_CACHE_DIR` (`llms-full.txt`, `metadata.json`, `validation-history.json`, `index-snapshot.json`, `cache.db`) and run `refresh_docs(force=true)`.
 - Stale fallback visible: check `get_status().freshness.lastValidationError`, `validationBackoff`, and `validationFailureHistory`.
 - Parser issues: inspect `get_status().index.parseDiagnostics` for `mode`, `pageMarkerCount`, `malformedMarkerCount`, and warnings.
 - Connectivity check: run `bun run doctor` to verify source reachability and cache path writability.
+- Node sqlite mode requires Node 22+ (`node:sqlite`).
 
 ## Release notes process
 
@@ -332,5 +379,5 @@ Flow 4: human-readable output for interactive troubleshooting
 ## CI
 
 - GitHub Actions workflow: `.github/workflows/ci.yml`.
-- Bun job gates: `bun test`, `bun run build`, `bun run smoke`.
-- Node compatibility job gates: `bun run build` + smoke against `node dist/index.js` via `bun run smoke -- --server node-dist`.
+- Bun job gates: `bun test`, `bun run build:bundle`, smoke against bundled runtime (`bun-bundle`).
+- Node compatibility job gates: `bun run build:bundle`, smoke against bundled runtime (`node-bundle`) with sqlite mode.

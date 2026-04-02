@@ -16,6 +16,7 @@ export interface CachePaths {
   metadataFile: string;
   validationHistoryFile: string;
   indexSnapshotFile: string;
+  sqliteFile: string;
 }
 
 export interface PageDoc {
@@ -93,9 +94,39 @@ export interface ValidationFailureRecord {
   message: string;
 }
 
+export interface IndexSnapshotRecord {
+  createdAt: string;
+  sourceSha256: string;
+  parserVersion: string;
+  indexVersion: string;
+  chunks: DocChunk[];
+  parseDiagnostics: ParseDiagnostics;
+  indexState?: HybridIndexPersistedState | null;
+}
+
+export interface PersistedPreIndexedChunk {
+  chunkId: string;
+  lexicalTerms: string[];
+  lexicalTermFrequency: Array<[string, number]>;
+  lexicalLength: number;
+  trigramTerms: string[];
+}
+
+export interface HybridIndexPersistedState {
+  lexicalPostings: Array<[string, string[]]>;
+  trigramPostings: Array<[string, string[]]>;
+  preIndexed: PersistedPreIndexedChunk[];
+  lexicalDocFrequencies: Array<[string, number]>;
+  avgLexicalDocLength: number;
+}
+
+export type StorageMode = "json" | "sqlite";
+export type SqliteDriver = "auto" | "bun-sqlite" | "node-sqlite";
+
 export interface StatusReport {
   sourceUrl: string;
   cachePath: string;
+  storageMode: StorageMode;
   hasCache: boolean;
   freshness: {
     state: "fresh" | "stale-soft" | "stale-hard" | "missing";

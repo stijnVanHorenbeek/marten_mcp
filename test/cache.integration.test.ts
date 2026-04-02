@@ -31,12 +31,19 @@ Updated content for projections.
 describe("docs cache revalidation", () => {
   let tempDir: string;
   let originalCacheDir: string | undefined;
+  let originalStorageMode: string | undefined;
+  let originalSqlitePath: string | undefined;
+  let originalSqliteDriver: string | undefined;
   let originalFetch: typeof globalThis.fetch;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "marten-mcp-cache-"));
     originalCacheDir = process.env.MARTEN_MCP_CACHE_DIR;
+    originalStorageMode = process.env.MARTEN_MCP_STORAGE_MODE;
+    originalSqlitePath = process.env.MARTEN_MCP_SQLITE_PATH;
+    originalSqliteDriver = process.env.MARTEN_MCP_SQLITE_DRIVER;
     process.env.MARTEN_MCP_CACHE_DIR = tempDir;
+    process.env.MARTEN_MCP_STORAGE_MODE = "json";
     originalFetch = globalThis.fetch;
   });
 
@@ -47,6 +54,25 @@ describe("docs cache revalidation", () => {
     } else {
       process.env.MARTEN_MCP_CACHE_DIR = originalCacheDir;
     }
+
+    if (originalStorageMode === undefined) {
+      delete process.env.MARTEN_MCP_STORAGE_MODE;
+    } else {
+      process.env.MARTEN_MCP_STORAGE_MODE = originalStorageMode;
+    }
+
+    if (originalSqlitePath === undefined) {
+      delete process.env.MARTEN_MCP_SQLITE_PATH;
+    } else {
+      process.env.MARTEN_MCP_SQLITE_PATH = originalSqlitePath;
+    }
+
+    if (originalSqliteDriver === undefined) {
+      delete process.env.MARTEN_MCP_SQLITE_DRIVER;
+    } else {
+      process.env.MARTEN_MCP_SQLITE_DRIVER = originalSqliteDriver;
+    }
+
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -78,9 +104,14 @@ describe("docs cache revalidation", () => {
 
     const paths = resolveCachePaths();
     const snapshotJson = await fs.readFile(paths.indexSnapshotFile, "utf8");
-    const snapshot = JSON.parse(snapshotJson) as { sourceSha256: string; chunks: unknown[] };
+    const snapshot = JSON.parse(snapshotJson) as {
+      sourceSha256: string;
+      chunks: unknown[];
+      indexState?: { lexicalPostings?: unknown[] };
+    };
     expect(snapshot.sourceSha256).toBe(result.metadata.sha256);
     expect(snapshot.chunks.length).toBeGreaterThan(0);
+    expect(snapshot.indexState?.lexicalPostings?.length ?? 0).toBeGreaterThan(0);
   });
 
   test("revalidates stale cache with conditional headers (304)", async () => {
@@ -277,6 +308,36 @@ describe("docs cache revalidation", () => {
 
     expect(backoff.consecutiveFailures).toBeGreaterThanOrEqual(2);
     expect(backoff.active).toBe(true);
+  });
+
+  test("sqlite storage mode persists docs and metadata", async () => {
+    process.env.MARTEN_MCP_STORAGE_MODE = "sqlite";
+    process.env.MARTEN_MCP_SQLITE_DRIVER = "bun-sqlite";
+    process.env.MARTEN_MCP_SQLITE_PATH = path.join(tempDir, "cache.db");
+
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      return new Response(SAMPLE_DOCS_V1, {
+        status: 200,
+        headers: {
+          etag: '"v1"',
+          "last-modified": "Wed, 01 Apr 2026 14:20:00 GMT"
+        }
+      });
+    }) as unknown as typeof fetch;
+
+    const first = new DocsCache();
+    const firstResult = await first.ensureReady();
+    expect(firstResult.metadata.etag).toBe('"v1"');
+
+    const second = new DocsCache();
+    const secondResult = await second.ensureReady();
+
+    expect(fetchCount).toBe(1);
+    expect(secondResult.metadata.sha256).toBe(firstResult.metadata.sha256);
+    expect(secondResult.chunks.length).toBeGreaterThan(0);
+    expect(secondResult.indexState?.lexicalPostings.length ?? 0).toBeGreaterThan(0);
   });
 });
 

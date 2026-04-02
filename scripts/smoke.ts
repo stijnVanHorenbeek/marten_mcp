@@ -1,6 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+const REQUEST_TIMEOUT_MS = 180_000;
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const markdown = args.includes("--markdown");
@@ -14,6 +16,7 @@ async function main(): Promise<void> {
     command: launch.command,
     args: launch.args,
     cwd: process.cwd(),
+    env: toStringEnv(process.env),
     stderr: "pipe"
   });
 
@@ -39,6 +42,8 @@ async function main(): Promise<void> {
     const status = await client.callTool({
       name: "get_status",
       arguments: { format }
+    }, undefined, {
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     const search = await client.callTool({
@@ -49,6 +54,8 @@ async function main(): Promise<void> {
         mode: "auto",
         format
       }
+    }, undefined, {
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     process.stdout.write("get_status:\n");
@@ -106,8 +113,32 @@ function resolveServerLaunch(mode: string): { command: string; args: string[] } 
     };
   }
 
+  if (mode === "node-bundle") {
+    return {
+      command: "node",
+      args: ["bundle/index.js"]
+    };
+  }
+
+  if (mode === "bun-bundle") {
+    return {
+      command: "bun",
+      args: ["run", "bundle/index.js"]
+    };
+  }
+
   return {
     command: "bun",
     args: ["run", "src/index.ts"]
   };
+}
+
+function toStringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === "string") {
+      out[key] = value;
+    }
+  }
+  return out;
 }

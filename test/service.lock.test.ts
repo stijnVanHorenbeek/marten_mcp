@@ -75,6 +75,10 @@ class MockCache {
   public getCachePath(): string {
     return "/tmp/mock-cache";
   }
+
+  public getStorageMode(): "json" {
+    return "json";
+  }
 }
 
 function buildEnsureResult(seq: number, overrides: Partial<EnsureResult> = {}): EnsureResult {

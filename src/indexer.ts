@@ -1,4 +1,11 @@
-import type { ContextMode, DocChunk, PageSummary, SearchMode, SearchResult } from "./types.js";
+import type {
+  ContextMode,
+  DocChunk,
+  HybridIndexPersistedState,
+  PageSummary,
+  SearchMode,
+  SearchResult
+} from "./types.js";
 import { SEARCH_FIELD_WEIGHTS } from "./config.js";
 import {
   includesPhraseCaseInsensitive,
@@ -32,7 +39,7 @@ export class HybridIndex {
   private readonly lexicalDocFrequencies: Map<string, number>;
   private avgLexicalDocLength: number;
 
-  public constructor(chunks: DocChunk[]) {
+  public constructor(chunks: DocChunk[], persistedState?: HybridIndexPersistedState | null) {
     this.chunks = chunks;
     this.byId = new Map(chunks.map((x) => [x.id, x]));
     this.chunksByPath = new Map();
@@ -41,7 +48,14 @@ export class HybridIndex {
     this.preIndexed = new Map();
     this.lexicalDocFrequencies = new Map();
     this.avgLexicalDocLength = 0;
-    this.build();
+
+    const hydrated = persistedState ? this.hydrateFromPersistedState(persistedState) : false;
+    if (!hydrated) {
+      this.build();
+      return;
+    }
+
+    this.buildChunksByPath();
   }
 
   public search(query: string, limit: number, mode: SearchMode = "auto", debug = false, offset = 0): SearchResult[] {
@@ -262,12 +276,6 @@ export class HybridIndex {
         posting.add(chunk.id);
       }
 
-      let pathChunks = this.chunksByPath.get(chunk.path);
-      if (!pathChunks) {
-        pathChunks = [];
-        this.chunksByPath.set(chunk.path, pathChunks);
-      }
-      pathChunks.push(chunk);
     }
 
     let totalLength = 0;
@@ -278,6 +286,75 @@ export class HybridIndex {
 
     for (const [term, posting] of this.lexicalPostings.entries()) {
       this.lexicalDocFrequencies.set(term, posting.size);
+    }
+
+    this.buildChunksByPath();
+  }
+
+  public toPersistedState(): HybridIndexPersistedState {
+    return {
+      lexicalPostings: Array.from(this.lexicalPostings.entries()).map(([term, ids]) => [term, Array.from(ids)]),
+      trigramPostings: Array.from(this.trigramPostings.entries()).map(([tri, ids]) => [tri, Array.from(ids)]),
+      preIndexed: Array.from(this.preIndexed.values()).map((entry) => ({
+        chunkId: entry.chunk.id,
+        lexicalTerms: entry.lexicalTerms,
+        lexicalTermFrequency: Array.from(entry.lexicalTermFrequency.entries()),
+        lexicalLength: entry.lexicalLength,
+        trigramTerms: entry.trigramTerms
+      })),
+      lexicalDocFrequencies: Array.from(this.lexicalDocFrequencies.entries()),
+      avgLexicalDocLength: this.avgLexicalDocLength
+    };
+  }
+
+  private hydrateFromPersistedState(state: HybridIndexPersistedState): boolean {
+    try {
+      for (const [term, ids] of state.lexicalPostings) {
+        this.lexicalPostings.set(term, new Set(ids));
+      }
+
+      for (const [tri, ids] of state.trigramPostings) {
+        this.trigramPostings.set(tri, new Set(ids));
+      }
+
+      for (const item of state.preIndexed) {
+        const chunk = this.byId.get(item.chunkId);
+        if (!chunk) {
+          return false;
+        }
+
+        this.preIndexed.set(item.chunkId, {
+          chunk,
+          lexicalTerms: item.lexicalTerms,
+          lexicalTermFrequency: new Map(item.lexicalTermFrequency),
+          lexicalLength: item.lexicalLength,
+          trigramTerms: item.trigramTerms
+        });
+      }
+
+      for (const [term, df] of state.lexicalDocFrequencies) {
+        this.lexicalDocFrequencies.set(term, df);
+      }
+      this.avgLexicalDocLength = state.avgLexicalDocLength;
+
+      if (this.preIndexed.size !== this.chunks.length) {
+        return false;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private buildChunksByPath(): void {
+    for (const chunk of this.chunks) {
+      let pathChunks = this.chunksByPath.get(chunk.path);
+      if (!pathChunks) {
+        pathChunks = [];
+        this.chunksByPath.set(chunk.path, pathChunks);
+      }
+      pathChunks.push(chunk);
     }
 
     for (const chunks of this.chunksByPath.values()) {
@@ -323,6 +400,11 @@ export class HybridIndex {
     }
     return out;
   }
+}
+
+export function buildHybridIndexPersistedState(chunks: DocChunk[]): HybridIndexPersistedState {
+  const index = new HybridIndex(chunks);
+  return index.toPersistedState();
 }
 
 function classifyQuery(query: string): SearchMode {
