@@ -17,6 +17,7 @@ The format is based on Keep a Changelog.
 - Structured stderr logging with event ids and context.
 - `doctor` diagnostics script for cache and network checks.
 - `perf:smoke` metrics script.
+- Tag-triggered GitHub release workflow with packaged `bundle/` and `dist/` artifacts.
 
 ### Changed
 - Search quality improvements including BM25 lexical scoring and better token normalization.
@@ -24,6 +25,7 @@ The format is based on Keep a Changelog.
 - Bundling moved to Bun (`Bun.build`) with minified distributable output.
 - Node sqlite runtime path uses Node 22+ `node:sqlite`.
 - CI now validates bundled artifact smoke tests on Bun and Node runtimes.
+- Release pipeline now enforces git tag/package version alignment.
 
 ## [0.1.0] - 2026-04-02
 

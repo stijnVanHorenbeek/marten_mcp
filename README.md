@@ -23,7 +23,8 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 .
 ├── .github
 │   └── workflows
-│       └── ci.yml
+│       ├── ci.yml
+│       └── release.yml
 ├── CHANGELOG.md
 ├── eval
 │   ├── baseline.json
@@ -71,11 +72,20 @@ bun run build
 node dist/index.js
 ```
 
+Build Node-compatible JS without sourcemaps (release-oriented):
+
+```bash
+bun run build:dist:release
+```
+
 Create a minified distributable bundle:
 
 ```bash
 bun run build:bundle
 node bundle/index.js
+
+# debug bundle with sourcemap
+bun run build:bundle:debug
 
 # full release build (tsc + bundle)
 bun run build:release
@@ -375,9 +385,12 @@ Flow 4: human-readable output for interactive troubleshooting
 - Keep release notes in `CHANGELOG.md`.
 - Add entries under `[Unreleased]` as work lands.
 - On release, move relevant entries to a dated version heading and start a fresh `[Unreleased]` section.
+- Bump `package.json` version and create a matching git tag (`vX.Y.Z`).
+- Push the tag to trigger `.github/workflows/release.yml`, which builds artifacts and publishes a GitHub release.
 
 ## CI
 
 - GitHub Actions workflow: `.github/workflows/ci.yml`.
-- Bun job gates: `bun test`, `bun run build:bundle`, smoke against bundled runtime (`bun-bundle`).
-- Node compatibility job gates: `bun run build:bundle`, smoke against bundled runtime (`node-bundle`) with sqlite mode.
+- Bun job gates: `bun test`, `bun run build:release`, smoke against bundled runtime (`bun-bundle`).
+- Node compatibility job gates: `bun run build:release`, smoke against bundled runtime (`node-bundle`) with sqlite mode.
+- Release workflow: `.github/workflows/release.yml` (triggered by `v*.*.*` tags; validates tag/version match).

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+const withSourcemap = process.argv.includes("--sourcemap");
 const outDir = path.join(process.cwd(), "bundle");
 const outFile = path.join(outDir, "index.js");
 
@@ -12,7 +13,7 @@ const result = await Bun.build({
   target: "node",
   format: "esm",
   minify: true,
-  sourcemap: "external",
+  sourcemap: withSourcemap ? "external" : "none",
   splitting: false,
   external: ["bun:sqlite", "node:sqlite"]
 });
