@@ -1,6 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+const REQUEST_TIMEOUT_MS = 180_000;
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const markdown = args.includes("--markdown");
@@ -40,6 +42,8 @@ async function main(): Promise<void> {
     const status = await client.callTool({
       name: "get_status",
       arguments: { format }
+    }, undefined, {
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     const search = await client.callTool({
@@ -50,6 +54,8 @@ async function main(): Promise<void> {
         mode: "auto",
         format
       }
+    }, undefined, {
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     process.stdout.write("get_status:\n");
