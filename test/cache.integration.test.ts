@@ -52,7 +52,7 @@ describe("docs cache revalidation", () => {
 
   test("fetches and persists docs on first run (200)", async () => {
     let callCount = 0;
-    globalThis.fetch = async () => {
+    globalThis.fetch = (async () => {
       callCount += 1;
       return new Response(SAMPLE_DOCS_V1, {
         status: 200,
@@ -61,7 +61,7 @@ describe("docs cache revalidation", () => {
           "last-modified": "Wed, 01 Apr 2026 14:20:00 GMT"
         }
       });
-    };
+    }) as unknown as typeof fetch;
 
     const cache = new DocsCache();
     const result = await cache.ensureReady();
@@ -82,7 +82,7 @@ describe("docs cache revalidation", () => {
     let ifNoneMatch: string | null = null;
     let ifModifiedSince: string | null = null;
 
-    globalThis.fetch = async (_input, init) => {
+    globalThis.fetch = (async (_input, init) => {
       fetchStage += 1;
       if (fetchStage === 1) {
         return new Response(SAMPLE_DOCS_V1, {
@@ -98,7 +98,7 @@ describe("docs cache revalidation", () => {
       ifNoneMatch = headers.get("If-None-Match");
       ifModifiedSince = headers.get("If-Modified-Since");
       return new Response(null, { status: 304 });
-    };
+    }) as unknown as typeof fetch;
 
     const cache = new DocsCache();
     const first = await cache.ensureReady();
@@ -107,8 +107,8 @@ describe("docs cache revalidation", () => {
 
     const second = await cache.ensureReady();
     expect(fetchStage).toBe(2);
-    expect(ifNoneMatch).toBe('"v1"');
-    expect(ifModifiedSince).toBe("Wed, 01 Apr 2026 14:20:00 GMT");
+    expect(String(ifNoneMatch)).toBe('"v1"');
+    expect(String(ifModifiedSince)).toBe("Wed, 01 Apr 2026 14:20:00 GMT");
     expect(second.metadata.sha256).toBe(first.metadata.sha256);
     expect(Date.parse(second.metadata.lastValidatedAt)).toBeGreaterThan(staleTimestamp);
     expect(second.usedStaleCacheDueToError).toBe(false);
@@ -116,7 +116,7 @@ describe("docs cache revalidation", () => {
 
   test("falls back to stale cache when validation fails", async () => {
     let fetchStage = 0;
-    globalThis.fetch = async () => {
+    globalThis.fetch = (async () => {
       fetchStage += 1;
       if (fetchStage === 1) {
         return new Response(SAMPLE_DOCS_V2, {
@@ -129,7 +129,7 @@ describe("docs cache revalidation", () => {
       }
 
       throw new Error("network unavailable");
-    };
+    }) as unknown as typeof fetch;
 
     const cache = new DocsCache();
     const first = await cache.ensureReady();
@@ -140,8 +140,108 @@ describe("docs cache revalidation", () => {
     expect(second.usedStaleCacheDueToError).toBe(true);
     expect(second.lastValidationError).toContain("network unavailable");
     expect(cache.getLastValidationError()).toContain("network unavailable");
+    const history = cache.getValidationFailureHistory();
+    expect(history.length).toBeGreaterThan(0);
+    expect(history[0]?.message).toContain("network unavailable");
     expect(second.metadata.sha256).toBe(first.metadata.sha256);
     expect(second.chunks.length).toBeGreaterThan(0);
+  });
+
+  test("applies revalidation backoff after failure and bypasses on force", async () => {
+    let fetchStage = 0;
+    globalThis.fetch = (async () => {
+      fetchStage += 1;
+      if (fetchStage === 1) {
+        return new Response(SAMPLE_DOCS_V1, {
+          status: 200,
+          headers: {
+            etag: '"v1"',
+            "last-modified": "Wed, 01 Apr 2026 14:20:00 GMT"
+          }
+        });
+      }
+
+      if (fetchStage === 2) {
+        throw new Error("temporary outage");
+      }
+
+      return new Response(null, { status: 304 });
+    }) as unknown as typeof fetch;
+
+    const cache = new DocsCache();
+    await cache.ensureReady();
+    await makeCacheStale();
+
+    const failed = await cache.ensureReady();
+    expect(failed.usedStaleCacheDueToError).toBe(true);
+    expect(fetchStage).toBe(2);
+
+    const backoff = cache.getValidationBackoffStatus();
+    expect(backoff.active).toBe(true);
+    expect(backoff.retryInSeconds).toBeGreaterThan(0);
+    expect(backoff.consecutiveFailures).toBe(1);
+
+    const skipped = await cache.ensureReady();
+    expect(fetchStage).toBe(2);
+    expect(skipped.usedStaleCacheDueToError).toBe(true);
+
+    const forced = await cache.ensureReady({ force: true });
+    expect(fetchStage).toBe(3);
+    expect(forced.usedStaleCacheDueToError).toBe(false);
+    expect(cache.getValidationBackoffStatus().active).toBe(false);
+  });
+
+  test("can serve stale immediately and recommend background revalidate", async () => {
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      return new Response(SAMPLE_DOCS_V1, {
+        status: 200,
+        headers: {
+          etag: '"v1"',
+          "last-modified": "Wed, 01 Apr 2026 14:20:00 GMT"
+        }
+      });
+    }) as unknown as typeof fetch;
+
+    const cache = new DocsCache();
+    await cache.ensureReady();
+    await makeCacheStale();
+
+    const result = await cache.ensureReady({ allowStaleWhileRevalidate: true });
+    expect(fetchCount).toBe(1);
+    expect(result.backgroundRevalidateRecommended).toBe(true);
+    expect(result.usedStaleCacheDueToError).toBe(false);
+  });
+
+  test("persists validation failure history across cache instances", async () => {
+    let fetchStage = 0;
+    globalThis.fetch = (async () => {
+      fetchStage += 1;
+      if (fetchStage === 1) {
+        return new Response(SAMPLE_DOCS_V1, {
+          status: 200,
+          headers: {
+            etag: '"v1"',
+            "last-modified": "Wed, 01 Apr 2026 14:20:00 GMT"
+          }
+        });
+      }
+
+      throw new Error("dns timeout");
+    }) as unknown as typeof fetch;
+
+    const firstCache = new DocsCache();
+    await firstCache.ensureReady();
+    await makeCacheStale();
+    await firstCache.ensureReady();
+    expect(firstCache.getValidationFailureHistory()[0]?.message).toContain("dns timeout");
+
+    const secondCache = new DocsCache();
+    await secondCache.ensureReady();
+    const history = secondCache.getValidationFailureHistory();
+    expect(history.length).toBeGreaterThan(0);
+    expect(history[0]?.message).toContain("dns timeout");
   });
 });
 

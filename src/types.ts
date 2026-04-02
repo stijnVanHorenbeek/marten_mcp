@@ -14,6 +14,7 @@ export interface CachePaths {
   dir: string;
   docsFile: string;
   metadataFile: string;
+  validationHistoryFile: string;
 }
 
 export interface PageDoc {
@@ -86,6 +87,11 @@ export interface FreshnessState {
   ageSinceValidationMs: number;
 }
 
+export interface ValidationFailureRecord {
+  at: string;
+  message: string;
+}
+
 export interface StatusReport {
   sourceUrl: string;
   cachePath: string;
@@ -96,6 +102,18 @@ export interface StatusReport {
     hardTtlHours: number;
     ageSinceValidationHours: number | null;
     lastValidationError: string | null;
+    validationBackoff: {
+      active: boolean;
+      retryInSeconds: number | null;
+      consecutiveFailures: number;
+    };
+    validationFailureHistory: ValidationFailureRecord[];
+    backgroundRefresh: {
+      running: boolean;
+      lastStartedAt: string | null;
+      lastFinishedAt: string | null;
+      lastResult: "updated" | "unchanged" | "failed" | null;
+    };
   };
   metadata: CacheMetadata | null;
   index: {

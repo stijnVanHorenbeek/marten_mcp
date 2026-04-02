@@ -317,10 +317,16 @@ function renderPageMarkdown(path: string, chunks: DocChunk[]): string {
 }
 
 function renderStatusMarkdown(status: StatusReport): string {
+  const backoff = status.freshness.validationBackoff;
+  const latestFailure = status.freshness.validationFailureHistory[0];
+  const bg = status.freshness.backgroundRefresh;
   return [
     `Source: ${status.sourceUrl}`,
     `Cache: \`${status.cachePath}\` (${status.hasCache ? "present" : "missing"})`,
     `Freshness: ${status.freshness.state}, age=${status.freshness.ageSinceValidationHours ?? "n/a"}h`,
+    `Backoff: active=${backoff.active}, retryInSeconds=${backoff.retryInSeconds ?? "n/a"}, failures=${backoff.consecutiveFailures}`,
+    `Validation history: count=${status.freshness.validationFailureHistory.length}, latest=${latestFailure ? `${latestFailure.at} ${latestFailure.message}` : "none"}`,
+    `Background refresh: running=${bg.running}, lastResult=${bg.lastResult ?? "none"}`,
     `Index: ready=${status.index.ready}, chunks=${status.index.chunkCount}, pages=${status.index.pageCount}`,
     `Parser: mode=${status.index.parseDiagnostics?.mode ?? "n/a"}, malformed=${status.index.parseDiagnostics?.malformedMarkerCount ?? 0}`
   ].join("\n");

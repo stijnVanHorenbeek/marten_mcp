@@ -7,6 +7,10 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 - Protocol: MCP over stdio (`stdin`/`stdout`), logging to `stderr`
 - Runtime: Bun for local development, Node-compatible output via `tsc`
 - Freshness model: soft TTL (12h), hard TTL (7d), conditional HTTP revalidation (`ETag`, `Last-Modified`)
+- Revalidation resilience: exponential backoff with jitter after failed validations (stale cache stays available)
+- Refresh safety: rebuild lock serializes concurrent refresh/index rebuild operations
+- Failure reporting: recent validation failures are persisted on disk and exposed in status
+- Startup behavior: stale cache is served immediately and stale entries are revalidated in background
 - Search model: BM25-style lexical scoring + trigram postings with query classification (`auto`, `lexical`, `trigram`, `exact`)
 
 ## File tree
@@ -238,7 +242,24 @@ Flow 4: human-readable output for interactive troubleshooting
     "softTtlHours": 12,
     "hardTtlHours": 168,
     "ageSinceValidationHours": 0.12,
-    "lastValidationError": null
+    "lastValidationError": null,
+    "validationBackoff": {
+      "active": false,
+      "retryInSeconds": null,
+      "consecutiveFailures": 0
+    },
+    "backgroundRefresh": {
+      "running": false,
+      "lastStartedAt": null,
+      "lastFinishedAt": null,
+      "lastResult": null
+    },
+    "validationFailureHistory": [
+      {
+        "at": "2026-04-02T08:10:00.000Z",
+        "message": "network unavailable"
+      }
+    ]
   },
   "metadata": {
     "sourceUrl": "https://martendb.io/llms-full.txt",

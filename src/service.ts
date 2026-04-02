@@ -19,6 +19,11 @@ export class DocsService {
   private index: HybridIndex | null = null;
   private metadata: CacheMetadata | null = null;
   private parseDiagnostics: ParseDiagnostics | null = null;
+  private rebuildQueue: Promise<void> = Promise.resolve();
+  private backgroundRefreshRunning = false;
+  private backgroundLastStartedAt: string | null = null;
+  private backgroundLastFinishedAt: string | null = null;
+  private backgroundLastResult: "updated" | "unchanged" | "failed" | null = null;
 
   public constructor(cache = new DocsCache()) {
     this.cache = cache;
@@ -29,18 +34,20 @@ export class DocsService {
   }
 
   public async refresh(force = false): Promise<{ refreshed: boolean; chunkCount: number; metadata: CacheMetadata }> {
-    const beforeHash = this.metadata?.sha256 ?? null;
-    const result = await this.cache.ensureReady({ force });
-    this.metadata = result.metadata;
-    this.parseDiagnostics = result.parseDiagnostics;
-    this.index = new HybridIndex(result.chunks);
-    const refreshed = beforeHash !== null ? beforeHash !== result.metadata.sha256 : true;
+    return this.withRebuildLock(async () => {
+      const beforeHash = this.metadata?.sha256 ?? null;
+      const result = await this.cache.ensureReady({ force });
+      this.metadata = result.metadata;
+      this.parseDiagnostics = result.parseDiagnostics;
+      this.index = new HybridIndex(result.chunks);
+      const refreshed = beforeHash !== null ? beforeHash !== result.metadata.sha256 : true;
 
     return {
       refreshed,
       chunkCount: result.chunks.length,
       metadata: result.metadata
     };
+    });
   }
 
   public async searchDocs(query: string, limit = 8, mode: SearchMode = "auto", debug = false, offset = 0): Promise<SearchResult[]> {
@@ -79,6 +86,8 @@ export class DocsService {
     const hasCache = await cacheExistsOnDisk();
     const metadata = await this.cache.getMetadata();
     const lastValidationError = this.cache.getLastValidationError();
+    const validationBackoff = this.cache.getValidationBackoffStatus();
+    const validationFailureHistory = this.cache.getValidationFailureHistory();
 
     let freshnessState: StatusReport["freshness"]["state"] = "missing";
     let ageHours: number | null = null;
@@ -104,7 +113,15 @@ export class DocsService {
         softTtlHours: msToHours(SOFT_TTL_MS),
         hardTtlHours: msToHours(HARD_TTL_MS),
         ageSinceValidationHours: ageHours,
-        lastValidationError
+        lastValidationError,
+        validationBackoff,
+        validationFailureHistory,
+        backgroundRefresh: {
+          running: this.backgroundRefreshRunning,
+          lastStartedAt: this.backgroundLastStartedAt,
+          lastFinishedAt: this.backgroundLastFinishedAt,
+          lastResult: this.backgroundLastResult
+        }
       },
       metadata,
       index: {
@@ -123,14 +140,61 @@ export class DocsService {
       return;
     }
 
-    const result = await this.cache.ensureReady({ force });
-    this.metadata = result.metadata;
-    this.parseDiagnostics = result.parseDiagnostics;
-    this.index = new HybridIndex(result.chunks);
-    logInfo("Index ready", {
-      chunkCount: result.chunks.length,
-      staleFallback: result.usedStaleCacheDueToError
+    await this.withRebuildLock(async () => {
+      if (!force && this.index) {
+        return;
+      }
+
+      const result = await this.cache.ensureReady({ force, allowStaleWhileRevalidate: !force });
+      this.metadata = result.metadata;
+      this.parseDiagnostics = result.parseDiagnostics;
+      this.index = new HybridIndex(result.chunks);
+      logInfo("Index ready", {
+        chunkCount: result.chunks.length,
+        staleFallback: result.usedStaleCacheDueToError
+      });
+
+      if (result.backgroundRevalidateRecommended) {
+        this.scheduleBackgroundRefresh();
+      }
     });
+  }
+
+  private scheduleBackgroundRefresh(): void {
+    if (this.backgroundRefreshRunning) {
+      return;
+    }
+
+    this.backgroundRefreshRunning = true;
+    this.backgroundLastStartedAt = new Date().toISOString();
+
+    void (async () => {
+      try {
+        const result = await this.refresh(false);
+        this.backgroundLastResult = result.refreshed ? "updated" : "unchanged";
+      } catch {
+        this.backgroundLastResult = "failed";
+      } finally {
+        this.backgroundLastFinishedAt = new Date().toISOString();
+        this.backgroundRefreshRunning = false;
+      }
+    })();
+  }
+
+  private async withRebuildLock<T>(operation: () => Promise<T>): Promise<T> {
+    let releaseCurrent: () => void = () => {};
+    const previous = this.rebuildQueue;
+    this.rebuildQueue = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+
+    await previous;
+
+    try {
+      return await operation();
+    } finally {
+      releaseCurrent();
+    }
   }
 }
 

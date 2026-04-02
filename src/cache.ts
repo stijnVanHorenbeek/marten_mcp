@@ -3,27 +3,52 @@ import path from "node:path";
 import { HARD_TTL_MS, INDEX_VERSION, PARSER_VERSION, SOFT_TTL_MS, SOURCE_URL, resolveCachePaths } from "./config.js";
 import { logInfo, logWarn } from "./logger.js";
 import { chunkPages, parsePagesWithDiagnostics } from "./parser.js";
-import type { CacheMetadata, DocChunk, FreshnessState, ParseDiagnostics } from "./types.js";
+import type { CacheMetadata, DocChunk, FreshnessState, ParseDiagnostics, ValidationFailureRecord } from "./types.js";
 import { nowIso, sha256 } from "./util.js";
 
 interface EnsureOptions {
   force?: boolean;
+  allowStaleWhileRevalidate?: boolean;
 }
+
+interface ValidationBackoffState {
+  consecutiveFailures: number;
+  nextRetryAtMs: number | null;
+}
+
+interface ValidationBackoffStatus {
+  active: boolean;
+  retryInSeconds: number | null;
+  consecutiveFailures: number;
+}
+
+const BACKOFF_BASE_MS = 5 * 60 * 1000;
+const BACKOFF_MAX_MS = 6 * 60 * 60 * 1000;
+const BACKOFF_JITTER_RATIO = 0.2;
+const MAX_VALIDATION_FAILURE_HISTORY = 20;
 
 export interface EnsureResult {
   metadata: CacheMetadata;
   rawDocs: string;
   chunks: DocChunk[];
   parseDiagnostics: ParseDiagnostics;
+  backgroundRevalidateRecommended: boolean;
   usedStaleCacheDueToError: boolean;
   lastValidationError: string | null;
 }
 
 export class DocsCache {
   private lastValidationError: string | null = null;
+  private validationFailureHistory: ValidationFailureRecord[] = [];
+  private validationHistoryLoaded = false;
+  private validationBackoff: ValidationBackoffState = {
+    consecutiveFailures: 0,
+    nextRetryAtMs: null
+  };
 
   public async ensureReady(options: EnsureOptions = {}): Promise<EnsureResult> {
     await this.ensureCacheDir();
+    await this.loadValidationHistoryOnce();
 
     const existingMeta = await this.readMetadata();
     const existingDocs = await this.readDocs();
@@ -34,6 +59,7 @@ export class DocsCache {
       this.lastValidationError = null;
       return {
         ...fetched,
+        backgroundRevalidateRecommended: false,
         usedStaleCacheDueToError: false,
         lastValidationError: this.lastValidationError
       };
@@ -48,7 +74,35 @@ export class DocsCache {
           rawDocs: existingDocs,
           chunks,
           parseDiagnostics,
+          backgroundRevalidateRecommended: false,
           usedStaleCacheDueToError: false,
+          lastValidationError: this.lastValidationError
+        };
+      }
+
+      if (options.allowStaleWhileRevalidate === true) {
+        const backoff = this.getValidationBackoffStatus();
+        const { chunks, parseDiagnostics } = this.buildChunks(existingDocs);
+        return {
+          metadata: existingMeta,
+          rawDocs: existingDocs,
+          chunks,
+          parseDiagnostics,
+          backgroundRevalidateRecommended: !backoff.active,
+          usedStaleCacheDueToError: false,
+          lastValidationError: this.lastValidationError
+        };
+      }
+
+      if (this.shouldSkipValidationDueToBackoff()) {
+        const { chunks, parseDiagnostics } = this.buildChunks(existingDocs);
+        return {
+          metadata: existingMeta,
+          rawDocs: existingDocs,
+          chunks,
+          parseDiagnostics,
+          backgroundRevalidateRecommended: false,
+          usedStaleCacheDueToError: true,
           lastValidationError: this.lastValidationError
         };
       }
@@ -57,15 +111,23 @@ export class DocsCache {
     try {
       const validated = await this.revalidate(existingMeta, existingDocs, options.force === true);
       this.lastValidationError = null;
+      this.clearValidationBackoff();
       return {
         ...validated,
+        backgroundRevalidateRecommended: false,
         usedStaleCacheDueToError: false,
         lastValidationError: null
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.lastValidationError = message;
-      logWarn("Revalidation failed; using stale cache", { error: message });
+      await this.recordValidationFailure(message);
+      const backoff = this.applyValidationBackoff();
+      logWarn("Revalidation failed; using stale cache", {
+        error: message,
+        consecutiveFailures: backoff.consecutiveFailures,
+        retryInSeconds: backoff.retryInSeconds
+      });
 
       const { chunks, parseDiagnostics } = this.buildChunks(existingDocs);
       return {
@@ -73,6 +135,7 @@ export class DocsCache {
         rawDocs: existingDocs,
         chunks,
         parseDiagnostics,
+        backgroundRevalidateRecommended: false,
         usedStaleCacheDueToError: true,
         lastValidationError: this.lastValidationError
       };
@@ -87,8 +150,77 @@ export class DocsCache {
     return this.readMetadata();
   }
 
+  public getValidationBackoffStatus(): ValidationBackoffStatus {
+    const now = Date.now();
+    const nextRetryAtMs = this.validationBackoff.nextRetryAtMs;
+    const active = nextRetryAtMs !== null && now < nextRetryAtMs;
+    const retryInSeconds = active ? Math.ceil((nextRetryAtMs - now) / 1000) : null;
+
+    return {
+      active,
+      retryInSeconds,
+      consecutiveFailures: this.validationBackoff.consecutiveFailures
+    };
+  }
+
+  public getValidationFailureHistory(): ValidationFailureRecord[] {
+    return [...this.validationFailureHistory];
+  }
+
   public getCachePath(): string {
     return resolveCachePaths().dir;
+  }
+
+  private shouldSkipValidationDueToBackoff(): boolean {
+    const backoff = this.getValidationBackoffStatus();
+    if (!backoff.active) {
+      return false;
+    }
+
+    logInfo("Skipping revalidation due to active backoff", {
+      retryInSeconds: backoff.retryInSeconds,
+      consecutiveFailures: backoff.consecutiveFailures
+    });
+    return true;
+  }
+
+  private clearValidationBackoff(): void {
+    this.validationBackoff = {
+      consecutiveFailures: 0,
+      nextRetryAtMs: null
+    };
+  }
+
+  private applyValidationBackoff(): ValidationBackoffStatus {
+    const nextFailureCount = this.validationBackoff.consecutiveFailures + 1;
+    const exponentialMs = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** (nextFailureCount - 1));
+    const jitterMultiplier = 1 + (Math.random() * 2 - 1) * BACKOFF_JITTER_RATIO;
+    const jitteredMs = Math.max(BACKOFF_BASE_MS, Math.round(exponentialMs * jitterMultiplier));
+    this.validationBackoff = {
+      consecutiveFailures: nextFailureCount,
+      nextRetryAtMs: Date.now() + jitteredMs
+    };
+
+    return this.getValidationBackoffStatus();
+  }
+
+  private async loadValidationHistoryOnce(): Promise<void> {
+    if (this.validationHistoryLoaded) {
+      return;
+    }
+
+    this.validationFailureHistory = await this.readValidationHistory();
+    this.validationHistoryLoaded = true;
+  }
+
+  private async recordValidationFailure(message: string): Promise<void> {
+    const entry: ValidationFailureRecord = {
+      at: nowIso(),
+      message
+    };
+
+    this.validationFailureHistory = [entry, ...this.validationFailureHistory].slice(0, MAX_VALIDATION_FAILURE_HISTORY);
+    await this.writeValidationHistory(this.validationFailureHistory);
   }
 
   private async revalidate(
@@ -236,6 +368,35 @@ export class DocsCache {
   private async writeMetadata(meta: CacheMetadata): Promise<void> {
     const paths = resolveCachePaths();
     await fs.writeFile(paths.metadataFile, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+  }
+
+  private async readValidationHistory(): Promise<ValidationFailureRecord[]> {
+    const paths = resolveCachePaths();
+    try {
+      const json = await fs.readFile(paths.validationHistoryFile, "utf8");
+      const parsed = JSON.parse(json) as unknown;
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      const history = parsed.filter(
+        (item): item is ValidationFailureRecord =>
+          typeof item === "object" &&
+          item !== null &&
+          "at" in item &&
+          "message" in item &&
+          typeof (item as { at: unknown }).at === "string" &&
+          typeof (item as { message: unknown }).message === "string"
+      );
+      return history.slice(0, MAX_VALIDATION_FAILURE_HISTORY);
+    } catch {
+      return [];
+    }
+  }
+
+  private async writeValidationHistory(history: ValidationFailureRecord[]): Promise<void> {
+    const paths = resolveCachePaths();
+    await fs.writeFile(paths.validationHistoryFile, `${JSON.stringify(history, null, 2)}\n`, "utf8");
   }
 }
 

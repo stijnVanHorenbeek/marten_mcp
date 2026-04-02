@@ -38,10 +38,10 @@ Goal: Make retrieval easier to use and less chatty.
 
 Goal: Keep behavior stable under flaky network and repeated runs.
 
-- [ ] Add revalidation backoff/jitter after network failures
-- [ ] Add refresh lock to prevent concurrent refresh/index rebuild races
-- [ ] Persist and report validation failure history (recent failures + timestamps)
-- [ ] Add optional startup mode to skip network if cache exists (`offline-prefer-cache`)
+- [x] Add revalidation backoff/jitter after network failures
+- [x] Add refresh lock to prevent concurrent refresh/index rebuild races
+- [x] Persist and report validation failure history (recent failures + timestamps)
+- [x] Serve cached index immediately and revalidate in background (stale-while-revalidate)
 - [ ] Add startup index snapshot load path (JSON) to speed warm start
 - [ ] Add tests for lock behavior and repeated failure scenarios
 
