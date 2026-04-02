@@ -2,7 +2,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 async function main(): Promise<void> {
-  const query = process.argv[2] ?? "session.Query<User>()";
+  const args = process.argv.slice(2);
+  const markdown = args.includes("--markdown");
+  const queryArg = args.find((arg) => !arg.startsWith("--"));
+  const query = queryArg ?? "session.Query<User>()";
+  const format = markdown ? "markdown" : "json";
   const transport = new StdioClientTransport({
     command: "bun",
     args: ["run", "src/index.ts"],
@@ -31,7 +35,7 @@ async function main(): Promise<void> {
 
     const status = await client.callTool({
       name: "get_status",
-      arguments: {}
+      arguments: { format }
     });
 
     const search = await client.callTool({
@@ -39,7 +43,8 @@ async function main(): Promise<void> {
       arguments: {
         query,
         limit: 3,
-        mode: "auto"
+        mode: "auto",
+        format
       }
     });
 

@@ -2,7 +2,16 @@ import { HARD_TTL_MS, INDEX_VERSION, PARSER_VERSION, SOFT_TTL_MS, SOURCE_URL } f
 import { DocsCache, cacheExistsOnDisk, computeFreshness } from "./cache.js";
 import { HybridIndex } from "./indexer.js";
 import { logInfo } from "./logger.js";
-import type { CacheMetadata, DocChunk, ParseDiagnostics, SearchMode, SearchResult, StatusReport } from "./types.js";
+import type {
+  CacheMetadata,
+  ContextMode,
+  DocChunk,
+  PageSummary,
+  ParseDiagnostics,
+  SearchMode,
+  SearchResult,
+  StatusReport
+} from "./types.js";
 import { clamp } from "./util.js";
 
 export class DocsService {
@@ -34,10 +43,11 @@ export class DocsService {
     };
   }
 
-  public async searchDocs(query: string, limit = 8, mode: SearchMode = "auto"): Promise<SearchResult[]> {
+  public async searchDocs(query: string, limit = 8, mode: SearchMode = "auto", debug = false, offset = 0): Promise<SearchResult[]> {
     await this.ensureIndex(false);
     const safeLimit = clamp(limit, 1, 25);
-    return this.index ? this.index.search(query, safeLimit, mode) : [];
+    const safeOffset = clamp(offset, 0, 2000);
+    return this.index ? this.index.search(query, safeLimit, mode, debug, safeOffset) : [];
   }
 
   public async readSection(id: string): Promise<DocChunk | null> {
@@ -45,11 +55,11 @@ export class DocsService {
     return this.index?.getById(id) ?? null;
   }
 
-  public async readContext(id: string, before = 1, after = 1): Promise<DocChunk[]> {
+  public async readContext(id: string, before = 1, after = 1, mode: ContextMode = "section"): Promise<DocChunk[]> {
     await this.ensureIndex(false);
     const safeBefore = clamp(before, 0, 10);
     const safeAfter = clamp(after, 0, 10);
-    return this.index?.getContext(id, safeBefore, safeAfter) ?? [];
+    return this.index?.getContext(id, safeBefore, safeAfter, mode) ?? [];
   }
 
   public async readPage(path: string, maxChunks = 12): Promise<DocChunk[]> {
@@ -57,6 +67,12 @@ export class DocsService {
     const safeMax = clamp(maxChunks, 1, 30);
     const chunks = this.index?.getPage(path) ?? [];
     return chunks.slice(0, safeMax);
+  }
+
+  public async listPages(prefix = "", limit = 50): Promise<PageSummary[]> {
+    await this.ensureIndex(false);
+    const safeLimit = clamp(limit, 1, 200);
+    return this.index?.listPages(prefix, safeLimit) ?? [];
   }
 
   public async getStatus(): Promise<StatusReport> {

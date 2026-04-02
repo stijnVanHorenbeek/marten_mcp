@@ -73,6 +73,32 @@ Configuration text.`
     expect(context.every((chunk) => chunk.headings.includes("Lifecycle"))).toBe(true);
   });
 
+  test("read context can scope to full page with contextMode page", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/aggregate-projections.md",
+        title: "Aggregate Projections",
+        raw: `# Aggregate Projections
+
+## Lifecycle
+
+Lifecycle text one.
+
+## Configuration
+
+Configuration text.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const lifecycleChunk = chunks.find((chunk) => chunk.headings.includes("Lifecycle"));
+    expect(lifecycleChunk).toBeTruthy();
+
+    const context = index.getContext(lifecycleChunk!.id, 10, 10, "page");
+    expect(context.length).toBeGreaterThan(1);
+    expect(context.some((chunk) => chunk.headings.includes("Configuration"))).toBe(true);
+  });
+
   test("exact phrase boosts title and heading matches", () => {
     const chunks = chunkPages([
       {
@@ -114,5 +140,125 @@ Configuration text.`
 
     expect(results.length).toBeGreaterThan(0);
     expect(results[0]?.path).toBe("/events/tenancy.md");
+  });
+
+  test("debug mode includes score breakdown fields", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/aggregate-projections.md",
+        title: "Aggregate Projections",
+        raw: `# Aggregate Projections\n\nUse aggregate projections for snapshots.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const results = index.search("aggregate projections", 3, "auto", true);
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]?.debug).toBeTruthy();
+    expect(results[0]?.debug?.decidedMode).toBe("lexical");
+    expect(typeof results[0]?.debug?.phraseBoost).toBe("number");
+  });
+
+  test("symbol-heavy exact query matches flexible code formatting", () => {
+    const chunks = chunkPages([
+      {
+        path: "/documents/querying.md",
+        title: "Querying",
+        raw: `# Querying\n\n\`session.Query <User> ()\` is valid in examples.`
+      },
+      {
+        path: "/events/projections.md",
+        title: "Projections",
+        raw: `# Projections\n\nProjection lifecycle notes.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const results = index.search("session.Query<User>()", 3, "exact");
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]?.path).toBe("/documents/querying.md");
+  });
+
+  test("mixed prose and code query favors chunk containing both", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/aggregate-projections.md",
+        title: "Aggregate Projections",
+        raw: `# Aggregate Projections\n\nThis section explains aggregate projection lifecycle.`
+      },
+      {
+        path: "/documents/querying.md",
+        title: "Querying",
+        raw: `# Querying\n\nUse \`session.Query<User>()\` in read models.`
+      },
+      {
+        path: "/events/projections/aggregate-projections.md",
+        title: "Aggregate Projections",
+        raw: `# Aggregate Projections\n\nUse \`session.Query<User>()\` while discussing projection lifecycle and aggregate projections.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const results = index.search("aggregate projections session.Query<User>()", 3, "auto");
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]?.path).toBe("/events/projections/aggregate-projections.md");
+  });
+
+  test("list pages supports prefix filtering and limits", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/a.md",
+        title: "Events A",
+        raw: `# Events A\n\nAlpha`
+      },
+      {
+        path: "/events/b.md",
+        title: "Events B",
+        raw: `# Events B\n\nBeta`
+      },
+      {
+        path: "/documents/a.md",
+        title: "Documents A",
+        raw: `# Documents A\n\nGamma`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const pages = index.listPages("/events", 1);
+
+    expect(pages.length).toBe(1);
+    expect(pages[0]?.path).toContain("/events/");
+  });
+
+  test("search supports offset paging", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/one.md",
+        title: "One",
+        raw: `# One\n\naggregate projections example one`
+      },
+      {
+        path: "/events/two.md",
+        title: "Two",
+        raw: `# Two\n\naggregate projections example two`
+      },
+      {
+        path: "/events/three.md",
+        title: "Three",
+        raw: `# Three\n\naggregate projections example three`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const firstPage = index.search("aggregate projections", 2, "auto", false, 0);
+    const secondPage = index.search("aggregate projections", 2, "auto", false, 2);
+
+    expect(firstPage.length).toBe(2);
+    expect(secondPage.length).toBe(1);
+    expect(secondPage[0]?.id).not.toBe(firstPage[0]?.id);
+    expect(secondPage[0]?.id).not.toBe(firstPage[1]?.id);
   });
 });

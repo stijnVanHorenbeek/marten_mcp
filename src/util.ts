@@ -17,11 +17,19 @@ export function normalizeWhitespace(input: string): string {
 }
 
 export function tokenize(input: string): string[] {
-  return input
-    .toLowerCase()
-    .split(/[^a-z0-9_]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 2);
+  const normalized = input.replace(/[`"'<>()[\]{}.,;:=!?/\\|+]/g, " ");
+  const rawTokens = normalized
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  const out: string[] = [];
+  for (const token of rawTokens) {
+    const expanded = expandToken(token);
+    out.push(...expanded);
+  }
+
+  return out.filter((token) => token.length >= 2);
 }
 
 export function trigrams(input: string): string[] {
@@ -40,4 +48,47 @@ export function trigrams(input: string): string[] {
 
 export function includesPhraseCaseInsensitive(haystack: string, needle: string): boolean {
   return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+
+function expandToken(token: string): string[] {
+  const base = token.toLowerCase();
+  const variants = new Set<string>([base]);
+
+  const splitVariants = token
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .map((part) => part.toLowerCase())
+    .filter((part) => part.length > 0);
+
+  for (const part of splitVariants) {
+    variants.add(part);
+  }
+
+  for (const value of Array.from(variants)) {
+    const singular = singularize(value);
+    if (singular) {
+      variants.add(singular);
+    }
+  }
+
+  return Array.from(variants);
+}
+
+function singularize(token: string): string | null {
+  if (token.length <= 3) {
+    return null;
+  }
+
+  if (token.endsWith("ies") && token.length > 4) {
+    return `${token.slice(0, -3)}y`;
+  }
+  if (/(sses|xes|ches|shes|zes)$/.test(token) && token.length > 4) {
+    return token.slice(0, -2);
+  }
+  if (token.endsWith("s") && !token.endsWith("ss")) {
+    return token.slice(0, -1);
+  }
+
+  return null;
 }

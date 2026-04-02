@@ -43,7 +43,22 @@ export interface DocChunk {
   pageOrder: number;
 }
 
+export interface PageSummary {
+  path: string;
+  title: string;
+  chunkCount: number;
+}
+
 export type SearchMode = "auto" | "lexical" | "trigram" | "exact";
+export type ContextMode = "section" | "page";
+
+export interface SearchFieldWeights {
+  title: number;
+  headings: number;
+  path: number;
+  body: number;
+  code: number;
+}
 
 export interface SearchResult {
   id: string;
@@ -54,6 +69,13 @@ export interface SearchResult {
   lexicalScore: number;
   trigramScore: number;
   snippet: string;
+  debug?: {
+    decidedMode: SearchMode;
+    queryClass: SearchMode;
+    phraseBoost: number;
+    codeBoost: number;
+    shortQueryFallback: boolean;
+  };
 }
 
 export interface FreshnessState {

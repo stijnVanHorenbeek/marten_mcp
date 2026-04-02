@@ -10,7 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "bun test",
-    "smoke": "bun run scripts/smoke.ts"
+    "smoke": "bun run scripts/smoke.ts",
+    "eval": "bun run scripts/eval.ts",
+    "eval:record": "bun run scripts/eval.ts --record"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

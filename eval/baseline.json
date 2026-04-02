@@ -1,0 +1,212 @@
+[
+  {
+    "query": "session.Query<User>()",
+    "expected": {
+      "pathIncludes": "/documents/deletes.md",
+      "headingIncludes": "Deleting Documents"
+    }
+  },
+  {
+    "query": "aggregate projections",
+    "expected": {
+      "pathIncludes": "/events/projections/aggregate-projections.md",
+      "headingIncludes": "Aggregate Projections"
+    }
+  },
+  {
+    "query": "inline projections",
+    "expected": {
+      "pathIncludes": "/events/projections/inline.md",
+      "headingIncludes": "Inline Projections"
+    }
+  },
+  {
+    "query": "live aggregation",
+    "expected": {
+      "pathIncludes": "/events/projections/live-aggregates.md",
+      "headingIncludes": "Live Aggregation"
+    }
+  },
+  {
+    "query": "async daemon",
+    "expected": {
+      "pathIncludes": "/events/projections/async-daemon.md",
+      "headingIncludes": "Async Projections Daemon"
+    }
+  },
+  {
+    "query": "event subscriptions",
+    "expected": {
+      "pathIncludes": "/events/subscriptions.md",
+      "headingIncludes": "Event Subscriptions&#x20;"
+    }
+  },
+  {
+    "query": "event metadata headers",
+    "expected": {
+      "pathIncludes": "/events/projections/using-metadata.md",
+      "headingIncludes": "Using Event Metadata"
+    }
+  },
+  {
+    "query": "stream identity",
+    "expected": {
+      "pathIncludes": "/events/configuration.md",
+      "headingIncludes": "Event Store Configuration"
+    }
+  },
+  {
+    "query": "append events",
+    "expected": {
+      "pathIncludes": "/events/appending.md",
+      "headingIncludes": "Appending Events"
+    }
+  },
+  {
+    "query": "upcasting events",
+    "expected": {
+      "pathIncludes": "/events/versioning.md",
+      "headingIncludes": "Events Versioning"
+    }
+  },
+  {
+    "query": "optimistic concurrency",
+    "expected": {
+      "pathIncludes": "/documents/concurrency.md",
+      "headingIncludes": "Optimistic Concurrency"
+    }
+  },
+  {
+    "query": "lightweight session",
+    "expected": {
+      "pathIncludes": "/configuration/hostbuilder.md",
+      "headingIncludes": "Bootstrapping Marten"
+    }
+  },
+  {
+    "query": "identity map session",
+    "expected": {
+      "pathIncludes": "/documents/sessions.md",
+      "headingIncludes": "Opening Sessions"
+    }
+  },
+  {
+    "query": "query by id",
+    "expected": {
+      "pathIncludes": "/documents/querying/byid.md",
+      "headingIncludes": "Loading Documents by Id"
+    }
+  },
+  {
+    "query": "compiled queries",
+    "expected": {
+      "pathIncludes": "/documents/querying/batched-queries.md",
+      "headingIncludes": "Batched Queries"
+    }
+  },
+  {
+    "query": "patch api",
+    "expected": {
+      "pathIncludes": "/documents/partial-updates-patching.md",
+      "headingIncludes": "Partial updates/patching"
+    }
+  },
+  {
+    "query": "bulk insert",
+    "expected": {
+      "pathIncludes": "/documents/storing.md",
+      "headingIncludes": "Storing Documents"
+    }
+  },
+  {
+    "query": "soft delete",
+    "expected": {
+      "pathIncludes": "/documents/deletes.md",
+      "headingIncludes": "Deleting Documents"
+    }
+  },
+  {
+    "query": "multi tenancy",
+    "expected": {
+      "pathIncludes": "/documents/multi-tenancy.md",
+      "headingIncludes": "Multi-Tenanted Documents"
+    }
+  },
+  {
+    "query": "conjoined tenancy",
+    "expected": {
+      "pathIncludes": "/documents/multi-tenancy.md",
+      "headingIncludes": "Multi-Tenanted Documents"
+    }
+  },
+  {
+    "query": "single stream projection",
+    "expected": {
+      "pathIncludes": "/events/projections/single-stream-projections.md",
+      "headingIncludes": "Single Stream Projections and Snapshots"
+    }
+  },
+  {
+    "query": "snapshot projection",
+    "expected": {
+      "pathIncludes": "/events/projections/single-stream-projections.md",
+      "headingIncludes": "Single Stream Projections and Snapshots"
+    }
+  },
+  {
+    "query": "projection lifecycle",
+    "expected": {
+      "pathIncludes": "/events/projections.md",
+      "headingIncludes": "Projections"
+    }
+  },
+  {
+    "query": "daemon high water mark",
+    "expected": {
+      "pathIncludes": "/events/projections/async-daemon.md",
+      "headingIncludes": "Async Projections Daemon"
+    }
+  },
+  {
+    "query": "tenant specific events",
+    "expected": {
+      "pathIncludes": "/events/projections/efcore.md",
+      "headingIncludes": "EF Core Projections"
+    }
+  },
+  {
+    "query": "document aliases",
+    "expected": {
+      "pathIncludes": "/documents/storage.md",
+      "headingIncludes": "Database Storage"
+    }
+  },
+  {
+    "query": "schema patching",
+    "expected": {
+      "pathIncludes": "/documents/partial-updates-patching.md",
+      "headingIncludes": "Partial updates/patching"
+    }
+  },
+  {
+    "query": "event store configuration",
+    "expected": {
+      "pathIncludes": "/events/configuration.md",
+      "headingIncludes": "Event Store Configuration"
+    }
+  },
+  {
+    "query": "UseIdentityMapForAggregates",
+    "expected": {
+      "pathIncludes": "/events/projections/read-aggregates.md",
+      "headingIncludes": "Reading Aggregates"
+    }
+  },
+  {
+    "query": "FetchLatest",
+    "expected": {
+      "pathIncludes": "/events/natural-keys.md",
+      "headingIncludes": "Natural Keys"
+    }
+  }
+]
