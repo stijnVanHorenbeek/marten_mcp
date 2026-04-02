@@ -9,6 +9,7 @@ SQLITE_PATH="${MARTEN_MCP_SQLITE_PATH:-$CACHE_DIR/cache.db}"
 RUNTIME="${MARTEN_MCP_RUNTIME:-auto}"
 STORAGE="${MARTEN_MCP_STORAGE_MODE:-auto}"
 TAG="${MARTEN_MCP_VERSION:-}"
+CLIENT="${MARTEN_MCP_CLIENT:-opencode}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -28,14 +29,32 @@ while [ "$#" -gt 0 ]; do
       fi
       REPO="$1"
       ;;
+    --client)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "Missing value for --client" >&2
+        exit 1
+      fi
+      CLIENT="$1"
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Supported: --version <vX.Y.Z>, --repo <owner/repo>" >&2
+      echo "Supported: --version <vX.Y.Z>, --repo <owner/repo>, --client <opencode|copilot>" >&2
       exit 1
       ;;
   esac
   shift
 done
+
+case "$CLIENT" in
+  opencode|copilot)
+    ;;
+  *)
+    echo "Invalid --client value: $CLIENT" >&2
+    echo "Expected one of: opencode, copilot" >&2
+    exit 1
+    ;;
+esac
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -108,7 +127,26 @@ chmod +x "$LAUNCHER"
 
 echo "Installed marten-docs-mcp $TAG at $LAUNCHER"
 echo
-cat <<EOF
+if [ "$CLIENT" = "copilot" ]; then
+  cat <<EOF
+{
+  "mcpServers": {
+    "marten-docs": {
+      "type": "local",
+      "command": "$LAUNCHER",
+      "args": [],
+      "env": {
+        "MARTEN_MCP_CACHE_DIR": "$CACHE_DIR",
+        "MARTEN_MCP_STORAGE_MODE": "$STORAGE",
+        "MARTEN_MCP_SQLITE_PATH": "$SQLITE_PATH"
+      },
+      "tools": ["*"]
+    }
+  }
+}
+EOF
+else
+  cat <<EOF
 {
   "mcp": {
     "marten-docs": {
@@ -123,3 +161,4 @@ cat <<EOF
   }
 }
 EOF
+fi

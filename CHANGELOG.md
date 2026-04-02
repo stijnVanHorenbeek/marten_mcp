@@ -8,6 +8,7 @@ The format is based on Keep a Changelog.
 
 ### Fixed
 - Quick installer now prints an OpenCode-compatible `mcp` config snippet (`type: local`, `command` array, `environment`).
+- Quick installer now supports `--client copilot` and prints a `mcpServers` snippet compatible with GitHub Copilot Chat config.
 
 ## [0.2.1] - 2026-04-02
 

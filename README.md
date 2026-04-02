@@ -8,6 +8,12 @@ Install from the latest GitHub release:
 curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh
 ```
 
+Print a GitHub Copilot Chat-compatible snippet (`~/.copilot/mcp-config.json` shape):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh -s -- --client copilot
+```
+
 Install a specific version:
 
 ```bash
