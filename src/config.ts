@@ -41,7 +41,7 @@ export function resolveStorageMode(): StorageMode {
 
 export function resolveSqliteDriver(): SqliteDriver {
   const driver = (process.env.MARTEN_MCP_SQLITE_DRIVER ?? "auto").trim().toLowerCase();
-  if (driver === "bun-sqlite" || driver === "better-sqlite3" || driver === "auto") {
+  if (driver === "bun-sqlite" || driver === "node-sqlite" || driver === "auto") {
     return driver;
   }
 

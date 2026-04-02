@@ -257,7 +257,7 @@ async function openSqlite(filePath: string, requestedDriver: SqliteDriver): Prom
     requestedDriver === "auto"
       ? runtime === "bun"
         ? "bun-sqlite"
-        : "better-sqlite3"
+        : "node-sqlite"
       : requestedDriver;
 
   if (driver === "bun-sqlite") {
@@ -277,9 +277,9 @@ async function openSqlite(filePath: string, requestedDriver: SqliteDriver): Prom
     };
   }
 
-  const moduleName = "better-sqlite3";
-  const mod = (await import(moduleName)) as { default: new (file: string) => BetterSqliteLike };
-  const db = new mod.default(filePath);
+  const moduleName = "node:sqlite";
+  const mod = (await import(moduleName)) as { DatabaseSync: new (file: string) => NodeSqliteLike };
+  const db = new mod.DatabaseSync(filePath);
   return {
     exec(sql: string): void {
       db.exec(sql);
@@ -301,7 +301,7 @@ interface BunDbLike {
   };
 }
 
-interface BetterSqliteLike {
+interface NodeSqliteLike {
   exec(sql: string): void;
   prepare(sql: string): {
     run(...params: unknown[]): unknown;

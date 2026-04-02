@@ -11,7 +11,7 @@ interface MigrationPayload {
 async function main(): Promise<void> {
   const runtime = detectRuntime();
   const requestedDriver = resolveSqliteDriver();
-  const driver = requestedDriver === "auto" ? (runtime === "bun" ? "bun-sqlite" : "better-sqlite3") : requestedDriver;
+  const driver = requestedDriver === "auto" ? (runtime === "bun" ? "bun-sqlite" : "node-sqlite") : requestedDriver;
   const paths = resolveCachePaths();
 
   const payload = await readJsonCachePayload(paths);
@@ -82,7 +82,7 @@ interface SqliteDbLike {
   run(sql: string, params?: unknown[]): void;
 }
 
-async function openSqlite(filePath: string, driver: "bun-sqlite" | "better-sqlite3"): Promise<SqliteDbLike> {
+async function openSqlite(filePath: string, driver: "bun-sqlite" | "node-sqlite"): Promise<SqliteDbLike> {
   if (driver === "bun-sqlite") {
     const moduleName = "bun:sqlite";
     const mod = (await import(moduleName)) as { Database: new (file: string, options?: { create?: boolean }) => BunDbLike };
@@ -97,9 +97,9 @@ async function openSqlite(filePath: string, driver: "bun-sqlite" | "better-sqlit
     };
   }
 
-  const moduleName = "better-sqlite3";
-  const mod = (await import(moduleName)) as { default: new (file: string) => BetterSqliteLike };
-  const db = new mod.default(filePath);
+  const moduleName = "node:sqlite";
+  const mod = (await import(moduleName)) as { DatabaseSync: new (file: string) => NodeSqliteLike };
+  const db = new mod.DatabaseSync(filePath);
   return {
     exec(sql: string): void {
       db.exec(sql);
@@ -117,7 +117,7 @@ interface BunDbLike {
   };
 }
 
-interface BetterSqliteLike {
+interface NodeSqliteLike {
   exec(sql: string): void;
   prepare(sql: string): {
     run(...params: unknown[]): unknown;

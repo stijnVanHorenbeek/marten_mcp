@@ -30,6 +30,7 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 ├── package.json
 ├── ROADMAP.md
 ├── scripts
+│   ├── bundle.ts
 │   ├── doctor.ts
 │   ├── eval.ts
 │   ├── migrate-to-sqlite.ts
@@ -69,6 +70,21 @@ Build Node-compatible JS:
 bun run build
 node dist/index.js
 ```
+
+Create a minified distributable bundle:
+
+```bash
+bun run build:bundle
+node bundle/index.js
+
+# full release build (tsc + bundle)
+bun run build:release
+```
+
+Notes:
+
+- The bundle intentionally keeps `bun:sqlite` and `node:sqlite` as runtime externals.
+- Node sqlite mode requires Node 22+ (`node:sqlite`).
 
 Clean build/test artifacts:
 
@@ -123,14 +139,14 @@ MARTEN_MCP_STORAGE_MODE=sqlite   # or json
 # sqlite db file path (only used in sqlite mode)
 MARTEN_MCP_SQLITE_PATH=~/.cache/marten-docs-mcp/cache.db
 
-# sqlite driver: auto | bun-sqlite | better-sqlite3
+# sqlite driver: auto | bun-sqlite | node-sqlite
 MARTEN_MCP_SQLITE_DRIVER=auto
 ```
 
 Notes:
 
 - In Bun, sqlite mode uses Bun's sqlite driver automatically.
-- In Node, sqlite mode expects `better-sqlite3`; without it, auto mode falls back to json storage.
+- In Node (22+), sqlite mode uses `node:sqlite`; older Node should use json mode.
 
 Metadata contains:
 

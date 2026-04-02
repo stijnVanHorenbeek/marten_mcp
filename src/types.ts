@@ -104,7 +104,7 @@ export interface IndexSnapshotRecord {
 }
 
 export type StorageMode = "json" | "sqlite";
-export type SqliteDriver = "auto" | "bun-sqlite" | "better-sqlite3";
+export type SqliteDriver = "auto" | "bun-sqlite" | "node-sqlite";
 
 export interface StatusReport {
   sourceUrl: string;
