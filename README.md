@@ -14,7 +14,7 @@ Install a specific version:
 curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh -s -- --version v0.2.1
 ```
 
-This installs the launcher and prints an MCP config snippet you can paste into your client config.
+This installs the launcher and prints an OpenCode `opencode.jsonc` snippet (`mcp` section) you can paste into your client config.
 
 ## Architecture summary
 

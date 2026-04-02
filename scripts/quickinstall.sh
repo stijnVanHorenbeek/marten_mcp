@@ -110,11 +110,11 @@ echo "Installed marten-docs-mcp $TAG at $LAUNCHER"
 echo
 cat <<EOF
 {
-  "mcpServers": {
+  "mcp": {
     "marten-docs": {
-      "command": "$LAUNCHER",
-      "args": [],
-      "env": {
+      "type": "local",
+      "command": ["$LAUNCHER"],
+      "environment": {
         "MARTEN_MCP_CACHE_DIR": "$CACHE_DIR",
         "MARTEN_MCP_STORAGE_MODE": "$STORAGE",
         "MARTEN_MCP_SQLITE_PATH": "$SQLITE_PATH"

@@ -6,6 +6,9 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+- Quick installer now prints an OpenCode-compatible `mcp` config snippet (`type: local`, `command` array, `environment`).
+
 ## [0.2.1] - 2026-04-02
 
 ### Fixed
