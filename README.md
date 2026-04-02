@@ -5,6 +5,7 @@
 This is a local MCP server that keeps a cached copy of `https://martendb.io/llms-full.txt`, chunks it structurally, builds an in-memory hybrid search index, and exposes focused retrieval tools over stdio.
 
 - Protocol: MCP over stdio (`stdin`/`stdout`), logging to `stderr`
+- Logging: structured JSON stderr records with `eventId`, `level`, timestamp, and optional context
 - Runtime: Bun for local development, Node-compatible output via `tsc`
 - Freshness model: soft TTL (12h), hard TTL (7d), conditional HTTP revalidation (`ETag`, `Last-Modified`)
 - Revalidation resilience: exponential backoff with jitter after failed validations (stale cache stays available)

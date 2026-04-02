@@ -1,28 +1,44 @@
-export function logInfo(message: string, details?: unknown): void {
-  if (details === undefined) {
-    process.stderr.write(`[INFO] ${message}\n`);
-    return;
-  }
+type LogLevel = "info" | "warn" | "error";
 
-  process.stderr.write(`[INFO] ${message} ${safeSerialize(details)}\n`);
+let eventCounter = 0;
+
+export function logInfo(message: string, details?: unknown): void {
+  writeStructuredLog("info", message, details);
 }
 
 export function logWarn(message: string, details?: unknown): void {
-  if (details === undefined) {
-    process.stderr.write(`[WARN] ${message}\n`);
-    return;
-  }
-
-  process.stderr.write(`[WARN] ${message} ${safeSerialize(details)}\n`);
+  writeStructuredLog("warn", message, details);
 }
 
 export function logError(message: string, details?: unknown): void {
+  writeStructuredLog("error", message, details);
+}
+
+function writeStructuredLog(level: LogLevel, message: string, details?: unknown): void {
+  const baseRecord = {
+    ts: new Date().toISOString(),
+    level,
+    eventId: nextEventId(),
+    message
+  };
+
   if (details === undefined) {
-    process.stderr.write(`[ERROR] ${message}\n`);
+    process.stderr.write(`${safeSerialize(baseRecord)}\n`);
     return;
   }
 
-  process.stderr.write(`[ERROR] ${message} ${safeSerialize(details)}\n`);
+  const record = {
+    ...baseRecord,
+    context: details
+  };
+  process.stderr.write(`${safeSerialize(record)}\n`);
+}
+
+function nextEventId(): string {
+  eventCounter += 1;
+  const counter = eventCounter.toString(36).padStart(4, "0");
+  const ts = Date.now().toString(36);
+  return `evt_${ts}_${counter}`;
 }
 
 function safeSerialize(value: unknown): string {
