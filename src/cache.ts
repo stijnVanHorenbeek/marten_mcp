@@ -10,6 +10,7 @@ import {
   resolveStorageMode
 } from "./config.js";
 import { logInfo, logWarn } from "./logger.js";
+import { buildHybridIndexPersistedState } from "./indexer.js";
 import { chunkPages, parsePagesWithDiagnostics } from "./parser.js";
 import { createDefaultStorage, type CacheStorage } from "./storage.js";
 import type {
@@ -19,6 +20,7 @@ import type {
   ParseDiagnostics,
   ValidationFailureRecord,
   IndexSnapshotRecord,
+  HybridIndexPersistedState,
   StorageMode
 } from "./types.js";
 import { nowIso, sha256 } from "./util.js";
@@ -49,6 +51,7 @@ export interface EnsureResult {
   rawDocs: string;
   chunks: DocChunk[];
   parseDiagnostics: ParseDiagnostics;
+  indexState?: HybridIndexPersistedState | null;
   backgroundRevalidateRecommended: boolean;
   usedStaleCacheDueToError: boolean;
   lastValidationError: string | null;
@@ -95,12 +98,13 @@ export class DocsCache {
     if (!options.force) {
       const freshness = computeFreshness(existingMeta);
       if (freshness.isFreshWithinSoftTtl) {
-        const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
+        const { chunks, parseDiagnostics, indexState } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
         return {
           metadata: existingMeta,
           rawDocs: existingDocs,
           chunks,
           parseDiagnostics,
+          indexState,
           backgroundRevalidateRecommended: false,
           usedStaleCacheDueToError: false,
           lastValidationError: this.lastValidationError
@@ -109,12 +113,13 @@ export class DocsCache {
 
       if (options.allowStaleWhileRevalidate === true) {
         const backoff = this.getValidationBackoffStatus();
-        const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
+        const { chunks, parseDiagnostics, indexState } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
         return {
           metadata: existingMeta,
           rawDocs: existingDocs,
           chunks,
           parseDiagnostics,
+          indexState,
           backgroundRevalidateRecommended: !backoff.active,
           usedStaleCacheDueToError: false,
           lastValidationError: this.lastValidationError
@@ -122,12 +127,13 @@ export class DocsCache {
       }
 
       if (this.shouldSkipValidationDueToBackoff()) {
-        const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
+        const { chunks, parseDiagnostics, indexState } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
         return {
           metadata: existingMeta,
           rawDocs: existingDocs,
           chunks,
           parseDiagnostics,
+          indexState,
           backgroundRevalidateRecommended: false,
           usedStaleCacheDueToError: true,
           lastValidationError: this.lastValidationError
@@ -156,12 +162,13 @@ export class DocsCache {
         retryInSeconds: backoff.retryInSeconds
       });
 
-      const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
+      const { chunks, parseDiagnostics, indexState } = await this.buildChunksWithSnapshot(existingMeta, existingDocs);
       return {
         metadata: existingMeta,
         rawDocs: existingDocs,
         chunks,
         parseDiagnostics,
+        indexState,
         backgroundRevalidateRecommended: false,
         usedStaleCacheDueToError: true,
         lastValidationError: this.lastValidationError
@@ -259,7 +266,13 @@ export class DocsCache {
     existingMeta: CacheMetadata,
     existingDocs: string,
     force: boolean
-  ): Promise<{ metadata: CacheMetadata; rawDocs: string; chunks: DocChunk[]; parseDiagnostics: ParseDiagnostics }> {
+  ): Promise<{
+    metadata: CacheMetadata;
+    rawDocs: string;
+    chunks: DocChunk[];
+    parseDiagnostics: ParseDiagnostics;
+    indexState: HybridIndexPersistedState;
+  }> {
     const headers = new Headers();
     if (!force) {
       if (existingMeta.etag) {
@@ -282,12 +295,13 @@ export class DocsCache {
       };
       const storage = await this.getStorage();
       await storage.writeMetadata(updatedMeta);
-      const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(updatedMeta, existingDocs);
+      const { chunks, parseDiagnostics, indexState } = await this.buildChunksWithSnapshot(updatedMeta, existingDocs);
       return {
         metadata: updatedMeta,
         rawDocs: existingDocs,
         chunks,
-        parseDiagnostics
+        parseDiagnostics,
+        indexState
       };
     }
 
@@ -308,12 +322,13 @@ export class DocsCache {
       const storage = await this.getStorage();
       await storage.writeMetadata(updatedMeta);
 
-      const { chunks, parseDiagnostics } = await this.buildChunksWithSnapshot(updatedMeta, existingDocs);
+      const { chunks, parseDiagnostics, indexState } = await this.buildChunksWithSnapshot(updatedMeta, existingDocs);
       return {
         metadata: updatedMeta,
         rawDocs: existingDocs,
         chunks,
-        parseDiagnostics
+        parseDiagnostics,
+        indexState
       };
     }
 
@@ -322,7 +337,13 @@ export class DocsCache {
 
   private async fetchAndBuild(
     _existingMeta: CacheMetadata | null
-  ): Promise<{ metadata: CacheMetadata; rawDocs: string; chunks: DocChunk[]; parseDiagnostics: ParseDiagnostics }> {
+  ): Promise<{
+    metadata: CacheMetadata;
+    rawDocs: string;
+    chunks: DocChunk[];
+    parseDiagnostics: ParseDiagnostics;
+    indexState: HybridIndexPersistedState;
+  }> {
     const response = await fetch(SOURCE_URL);
     if (!response.ok) {
       throw new Error(`Failed to fetch docs: ${response.status}`);
@@ -336,8 +357,15 @@ export class DocsCache {
     body: string,
     etag: string | null,
     lastModified: string | null
-  ): Promise<{ metadata: CacheMetadata; rawDocs: string; chunks: DocChunk[]; parseDiagnostics: ParseDiagnostics }> {
+  ): Promise<{
+    metadata: CacheMetadata;
+    rawDocs: string;
+    chunks: DocChunk[];
+    parseDiagnostics: ParseDiagnostics;
+    indexState: HybridIndexPersistedState;
+  }> {
     const { chunks, parseDiagnostics } = this.buildChunks(body);
+    const indexState = buildHybridIndexPersistedState(chunks);
     const now = nowIso();
     const metadata: CacheMetadata = {
       sourceUrl: SOURCE_URL,
@@ -360,14 +388,16 @@ export class DocsCache {
       parserVersion: PARSER_VERSION,
       indexVersion: INDEX_VERSION,
       chunks,
-      parseDiagnostics
+      parseDiagnostics,
+      indexState
     });
 
     return {
       metadata,
       rawDocs: body,
       chunks,
-      parseDiagnostics
+      parseDiagnostics,
+      indexState
     };
   }
 
@@ -382,7 +412,7 @@ export class DocsCache {
   private async buildChunksWithSnapshot(
     metadata: CacheMetadata,
     rawDocs: string
-  ): Promise<{ chunks: DocChunk[]; parseDiagnostics: ParseDiagnostics }> {
+  ): Promise<{ chunks: DocChunk[]; parseDiagnostics: ParseDiagnostics; indexState: HybridIndexPersistedState }> {
     const storage = await this.getStorage();
     const rawSha = sha256(rawDocs);
     if (rawSha !== metadata.sha256) {
@@ -391,15 +421,20 @@ export class DocsCache {
         actualSha: rawSha
       });
       const rebuilt = this.buildChunks(rawDocs);
+      const indexState = buildHybridIndexPersistedState(rebuilt.chunks);
       await storage.writeIndexSnapshot({
         createdAt: nowIso(),
         sourceSha256: rawSha,
         parserVersion: PARSER_VERSION,
         indexVersion: INDEX_VERSION,
         chunks: rebuilt.chunks,
-        parseDiagnostics: rebuilt.parseDiagnostics
+        parseDiagnostics: rebuilt.parseDiagnostics,
+        indexState
       });
-      return rebuilt;
+      return {
+        ...rebuilt,
+        indexState
+      };
     }
 
     const snapshot = await storage.readIndexSnapshot();
@@ -411,20 +446,26 @@ export class DocsCache {
     ) {
       return {
         chunks: snapshot.chunks,
-        parseDiagnostics: snapshot.parseDiagnostics
+        parseDiagnostics: snapshot.parseDiagnostics,
+        indexState: snapshot.indexState ?? buildHybridIndexPersistedState(snapshot.chunks)
       };
     }
 
     const rebuilt = this.buildChunks(rawDocs);
+    const indexState = buildHybridIndexPersistedState(rebuilt.chunks);
     await storage.writeIndexSnapshot({
       createdAt: nowIso(),
       sourceSha256: metadata.sha256,
       parserVersion: PARSER_VERSION,
       indexVersion: INDEX_VERSION,
       chunks: rebuilt.chunks,
-      parseDiagnostics: rebuilt.parseDiagnostics
+      parseDiagnostics: rebuilt.parseDiagnostics,
+      indexState
     });
-    return rebuilt;
+    return {
+      ...rebuilt,
+      indexState
+    };
   }
 
   private async readValidationHistory(): Promise<ValidationFailureRecord[]> {

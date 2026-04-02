@@ -104,9 +104,14 @@ describe("docs cache revalidation", () => {
 
     const paths = resolveCachePaths();
     const snapshotJson = await fs.readFile(paths.indexSnapshotFile, "utf8");
-    const snapshot = JSON.parse(snapshotJson) as { sourceSha256: string; chunks: unknown[] };
+    const snapshot = JSON.parse(snapshotJson) as {
+      sourceSha256: string;
+      chunks: unknown[];
+      indexState?: { lexicalPostings?: unknown[] };
+    };
     expect(snapshot.sourceSha256).toBe(result.metadata.sha256);
     expect(snapshot.chunks.length).toBeGreaterThan(0);
+    expect(snapshot.indexState?.lexicalPostings?.length ?? 0).toBeGreaterThan(0);
   });
 
   test("revalidates stale cache with conditional headers (304)", async () => {
@@ -332,6 +337,7 @@ describe("docs cache revalidation", () => {
     expect(fetchCount).toBe(1);
     expect(secondResult.metadata.sha256).toBe(firstResult.metadata.sha256);
     expect(secondResult.chunks.length).toBeGreaterThan(0);
+    expect(secondResult.indexState?.lexicalPostings.length ?? 0).toBeGreaterThan(0);
   });
 });
 

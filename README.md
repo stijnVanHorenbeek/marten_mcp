@@ -14,6 +14,7 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 - Failure reporting: recent validation failures are persisted on disk and exposed in status
 - Startup behavior: stale cache is served immediately and stale entries are revalidated in background
 - Warm start speed: parser/chunk output snapshot is cached on disk and reused when hashes match
+- Index hydration: in-memory index can be hydrated from persisted postings snapshot (avoids retokenizing on startup)
 - Search model: BM25-style lexical scoring + trigram postings with query classification (`auto`, `lexical`, `trigram`, `exact`)
 
 ## File tree
