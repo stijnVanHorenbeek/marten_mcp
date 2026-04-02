@@ -51,10 +51,10 @@ Goal: Make local operation and debugging straightforward.
 
 - [x] Add structured stderr logging (event ids + context)
 - [x] Add `doctor` command/script for cache path, permissions, and fetch checks
-- [ ] Add CI for Bun + Node (test, build, smoke)
-- [ ] Add release notes/changelog process
-- [ ] Add troubleshooting section (cache reset, stale fallback, parser diagnostics)
-- [ ] Add perf smoke metrics (startup time, index size, search latency sample)
+- [x] Add CI for Bun + Node (test, build, smoke)
+- [x] Add release notes/changelog process
+- [x] Add troubleshooting section (cache reset, stale fallback, parser diagnostics)
+- [x] Add perf smoke metrics (startup time, index size, search latency sample)
 
 ## Ongoing Maintenance
 
@@ -74,8 +74,8 @@ Goal: Make local operation and debugging straightforward.
 
 ## Definition of Done (per milestone)
 
-- [ ] Tests green (`bun test`)
-- [ ] Build green (`bun run build`)
-- [ ] Smoke green (`bun run smoke`)
-- [ ] No unbounded MCP responses
-- [ ] README updated for changed behavior
+- [x] Tests green (`bun test`)
+- [x] Build green (`bun run build`)
+- [x] Smoke green (`bun run smoke`)
+- [x] No unbounded MCP responses
+- [x] README updated for changed behavior

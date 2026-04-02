@@ -12,6 +12,7 @@
     "test": "bun test",
     "smoke": "bun run scripts/smoke.ts",
     "doctor": "bun run scripts/doctor.ts",
+    "perf:smoke": "bun run scripts/perf-smoke.ts",
     "eval": "bun run scripts/eval.ts",
     "eval:record": "bun run scripts/eval.ts --record"
   },

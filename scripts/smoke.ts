@@ -4,12 +4,15 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const markdown = args.includes("--markdown");
-  const queryArg = args.find((arg) => !arg.startsWith("--"));
+  const serverMode = readOption(args, "--server") ?? "bun-src";
+  const queryArg = args.find((arg) => !arg.startsWith("--") && arg !== serverMode);
   const query = queryArg ?? "session.Query<User>()";
   const format = markdown ? "markdown" : "json";
+  const launch = resolveServerLaunch(serverMode);
+
   const transport = new StdioClientTransport({
-    command: "bun",
-    args: ["run", "src/index.ts"],
+    command: launch.command,
+    args: launch.args,
     cwd: process.cwd(),
     stderr: "pipe"
   });
@@ -80,3 +83,31 @@ void main().catch((error) => {
   process.stderr.write(`[smoke] failed: ${message}\n`);
   process.exitCode = 1;
 });
+
+function readOption(args: string[], key: string): string | null {
+  const idx = args.indexOf(key);
+  if (idx < 0) {
+    return null;
+  }
+
+  const value = args[idx + 1];
+  if (!value || value.startsWith("--")) {
+    return null;
+  }
+
+  return value;
+}
+
+function resolveServerLaunch(mode: string): { command: string; args: string[] } {
+  if (mode === "node-dist") {
+    return {
+      command: "node",
+      args: ["dist/index.js"]
+    };
+  }
+
+  return {
+    command: "bun",
+    args: ["run", "src/index.ts"]
+  };
+}

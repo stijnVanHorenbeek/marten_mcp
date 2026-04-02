@@ -19,13 +19,19 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 
 ```text
 .
+├── .github
+│   └── workflows
+│       └── ci.yml
+├── CHANGELOG.md
 ├── eval
 │   ├── baseline.json
 │   └── queries.json
 ├── package.json
 ├── ROADMAP.md
 ├── scripts
+│   ├── doctor.ts
 │   ├── eval.ts
+│   ├── perf-smoke.ts
 │   └── smoke.ts
 ├── tsconfig.json
 ├── src
@@ -41,8 +47,10 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 │   └── util.ts
 └── test
     ├── cache.integration.test.ts
+    ├── logger.test.ts
     ├── parser.test.ts
-    └── search.test.ts
+    ├── search.test.ts
+    └── service.lock.test.ts
 ```
 
 ## Run and build
@@ -166,6 +174,14 @@ Run environment and cache diagnostics:
 bun run doctor
 # machine-readable output
 bun run doctor --json
+```
+
+Run perf smoke metrics:
+
+```bash
+bun run perf:smoke
+# machine-readable output
+bun run perf:smoke --json
 ```
 
 Run retrieval evaluation baseline checks:
@@ -297,6 +313,25 @@ Flow 4: human-readable output for interactive troubleshooting
   }
 }
 ```
+
+## Troubleshooting
+
+- Cache reset: remove cache files (`llms-full.txt`, `metadata.json`, `validation-history.json`, `index-snapshot.json`) from `MARTEN_MCP_CACHE_DIR` and run `refresh_docs(force=true)`.
+- Stale fallback visible: check `get_status().freshness.lastValidationError`, `validationBackoff`, and `validationFailureHistory`.
+- Parser issues: inspect `get_status().index.parseDiagnostics` for `mode`, `pageMarkerCount`, `malformedMarkerCount`, and warnings.
+- Connectivity check: run `bun run doctor` to verify source reachability and cache path writability.
+
+## Release notes process
+
+- Keep release notes in `CHANGELOG.md`.
+- Add entries under `[Unreleased]` as work lands.
+- On release, move relevant entries to a dated version heading and start a fresh `[Unreleased]` section.
+
+## CI
+
+- GitHub Actions workflow: `.github/workflows/ci.yml`.
+- Bun job gates: `bun test`, `bun run build`, `bun run smoke`.
+- Node compatibility job gates: `bun run build` + smoke against `node dist/index.js` via `bun run smoke -- --server node-dist`.
 
 ## Next improvements
 
