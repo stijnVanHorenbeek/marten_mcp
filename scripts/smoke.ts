@@ -106,6 +106,20 @@ function resolveServerLaunch(mode: string): { command: string; args: string[] } 
     };
   }
 
+  if (mode === "node-bundle") {
+    return {
+      command: "node",
+      args: ["bundle/index.js"]
+    };
+  }
+
+  if (mode === "bun-bundle") {
+    return {
+      command: "bun",
+      args: ["run", "bundle/index.js"]
+    };
+  }
+
   return {
     command: "bun",
     args: ["run", "src/index.ts"]
