@@ -7,6 +7,7 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 - Protocol: MCP over stdio (`stdin`/`stdout`), logging to `stderr`
 - Logging: structured JSON stderr records with `eventId`, `level`, timestamp, and optional context
 - Runtime: Bun for local development, Node-compatible output via `tsc`
+- Storage: runtime-inferred by default (`sqlite` on Bun, `json` on Node) with env override
 - Freshness model: soft TTL (12h), hard TTL (7d), conditional HTTP revalidation (`ETag`, `Last-Modified`)
 - Revalidation resilience: exponential backoff with jitter after failed validations (stale cache stays available)
 - Refresh safety: rebuild lock serializes concurrent refresh/index rebuild operations
@@ -43,6 +44,7 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 │   ├── mcpServer.ts
 │   ├── parser.ts
 │   ├── service.ts
+│   ├── storage.ts
 │   ├── types.ts
 │   └── util.ts
 └── test
@@ -110,6 +112,24 @@ Override with:
 ```bash
 MARTEN_MCP_CACHE_DIR=/some/path
 ```
+
+Storage mode controls:
+
+```bash
+# force storage mode
+MARTEN_MCP_STORAGE_MODE=sqlite   # or json
+
+# sqlite db file path (only used in sqlite mode)
+MARTEN_MCP_SQLITE_PATH=~/.cache/marten-docs-mcp/cache.db
+
+# sqlite driver: auto | bun-sqlite | better-sqlite3
+MARTEN_MCP_SQLITE_DRIVER=auto
+```
+
+Notes:
+
+- In Bun, sqlite mode uses Bun's sqlite driver automatically.
+- In Node, sqlite mode expects `better-sqlite3`; without it, auto mode falls back to json storage.
 
 Metadata contains:
 
@@ -263,7 +283,8 @@ Flow 4: human-readable output for interactive troubleshooting
 ```json
 {
   "sourceUrl": "https://martendb.io/llms-full.txt",
-  "cachePath": "~/.cache/marten-docs-mcp",
+  "storageMode": "sqlite",
+  "cachePath": "~/.cache/marten-docs-mcp/cache.db",
   "hasCache": true,
   "freshness": {
     "state": "fresh",

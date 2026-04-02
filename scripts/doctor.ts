@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { SOURCE_URL, resolveCachePaths } from "../src/config.js";
+import { SOURCE_URL, detectRuntime, resolveCachePaths, resolveSqliteDriver, resolveStorageMode } from "../src/config.js";
 
 type Health = "ok" | "warn" | "fail";
 
@@ -12,12 +12,16 @@ interface Check {
 
 interface DoctorReport {
   sourceUrl: string;
+  storageMode: string;
+  runtime: string;
+  sqliteDriver: string;
   cache: {
     dir: string;
     docsFile: string;
     metadataFile: string;
     validationHistoryFile: string;
     indexSnapshotFile: string;
+    sqliteFile: string;
   };
   checks: Check[];
   summary: {
@@ -31,24 +35,35 @@ interface DoctorReport {
 async function main(): Promise<void> {
   const asJson = process.argv.includes("--json");
   const cache = resolveCachePaths();
+  const storageMode = resolveStorageMode();
+  const runtime = detectRuntime();
+  const sqliteDriver = resolveSqliteDriver();
 
   const checks: Check[] = [];
   checks.push(await checkCacheDirWritable(cache.dir));
-  checks.push(await checkFile(cache.docsFile, "docs file"));
-  checks.push(await checkFile(cache.metadataFile, "metadata file"));
-  checks.push(await checkFile(cache.validationHistoryFile, "validation history file", true));
-  checks.push(await checkFile(cache.indexSnapshotFile, "index snapshot file", true));
+  if (storageMode === "sqlite") {
+    checks.push(await checkFile(cache.sqliteFile, "sqlite file", true));
+  } else {
+    checks.push(await checkFile(cache.docsFile, "docs file"));
+    checks.push(await checkFile(cache.metadataFile, "metadata file"));
+    checks.push(await checkFile(cache.validationHistoryFile, "validation history file", true));
+    checks.push(await checkFile(cache.indexSnapshotFile, "index snapshot file", true));
+  }
   checks.push(await checkSourceReachable(SOURCE_URL));
 
   const summary = summarize(checks);
   const report: DoctorReport = {
     sourceUrl: SOURCE_URL,
+    storageMode,
+    runtime,
+    sqliteDriver,
     cache: {
       dir: cache.dir,
       docsFile: cache.docsFile,
       metadataFile: cache.metadataFile,
       validationHistoryFile: cache.validationHistoryFile,
-      indexSnapshotFile: cache.indexSnapshotFile
+      indexSnapshotFile: cache.indexSnapshotFile,
+      sqliteFile: cache.sqliteFile
     },
     checks,
     summary
@@ -161,6 +176,8 @@ function renderMarkdown(report: DoctorReport): string {
   lines.push(`# Marten MCP Doctor`);
   lines.push(``);
   lines.push(`- Source URL: ${report.sourceUrl}`);
+  lines.push(`- Runtime: ${report.runtime}`);
+  lines.push(`- Storage: ${report.storageMode} (sqliteDriver=${report.sqliteDriver})`);
   lines.push(`- Cache Dir: \`${report.cache.dir}\``);
   lines.push(`- Overall: **${report.summary.status.toUpperCase()}** (ok=${report.summary.ok}, warn=${report.summary.warn}, fail=${report.summary.fail})`);
   lines.push(``);

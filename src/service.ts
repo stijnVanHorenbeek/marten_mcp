@@ -107,6 +107,7 @@ export class DocsService {
     return {
       sourceUrl: SOURCE_URL,
       cachePath: this.cache.getCachePath(),
+      storageMode: this.cache.getStorageMode(),
       hasCache,
       freshness: {
         state: freshnessState,
