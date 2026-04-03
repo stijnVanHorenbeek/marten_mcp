@@ -2,3 +2,5 @@ node_modules/
 dist/
 bundle/
 bun.lock
+eval/generated/
+eval/mined-candidates*.json

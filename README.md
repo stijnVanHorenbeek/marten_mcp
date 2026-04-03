@@ -276,7 +276,7 @@ You can mine candidate eval cases from telemetry logs:
 bun run dev
 
 # then mine query->path candidates from collected events
-bun run eval:mine -- --input ~/.cache/marten-docs-mcp/telemetry.jsonl --output eval/mined-candidates.json
+bun run eval:mine -- --input ~/.cache/marten-docs-mcp/telemetry.jsonl --output eval/generated/mined-candidates.json
 ```
 
 The mined output includes `suggestedExpected` fields that can be copied into `eval/baseline.json`. For ambiguous queries, suggestions may include `pathAnyOf`.

@@ -203,7 +203,7 @@
     }
   },
   {
-    "query": "UseIdentityMapForAggregates",
+    "query": "UseIdentityMapForAggregates read aggregates",
     "expected": {
       "pathIncludes": "/events/projections/read-aggregates.md",
       "headingIncludes": "Reading Aggregates"
@@ -212,8 +212,25 @@
   {
     "query": "FetchLatest",
     "expected": {
+      "pathAnyOf": [
+        "/events/natural-keys.md",
+        "/events/projections/read-aggregates.md"
+      ],
+      "headingIncludes": "FetchLatest"
+    }
+  },
+  {
+    "query": "FetchLatest by natural key",
+    "expected": {
       "pathIncludes": "/events/natural-keys.md",
       "headingIncludes": "Natural Keys"
+    }
+  },
+  {
+    "query": "FetchLatest read aggregates",
+    "expected": {
+      "pathIncludes": "/events/projections/read-aggregates.md",
+      "headingIncludes": "Reading Aggregates"
     }
   }
 ]

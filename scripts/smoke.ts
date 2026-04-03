@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-const REQUEST_TIMEOUT_MS = 180_000;
+const REQUEST_TIMEOUT_MS = 300_000;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -39,24 +39,32 @@ async function main(): Promise<void> {
   try {
     await client.connect(transport);
 
-    const status = await client.callTool({
-      name: "get_status",
-      arguments: { format }
-    }, undefined, {
-      timeout: REQUEST_TIMEOUT_MS
-    });
-
-    const search = await client.callTool({
-      name: "search_docs",
-      arguments: {
-        query,
-        limit: 3,
-        mode: "auto",
-        format
+    const status = await client.callTool(
+      {
+        name: "get_status",
+        arguments: { format }
+      },
+      undefined,
+      {
+        timeout: REQUEST_TIMEOUT_MS
       }
-    }, undefined, {
-      timeout: REQUEST_TIMEOUT_MS
-    });
+    );
+
+    const search = await client.callTool(
+      {
+        name: "search_docs",
+        arguments: {
+          query,
+          limit: 3,
+          mode: "auto",
+          format
+        }
+      },
+      undefined,
+      {
+        timeout: REQUEST_TIMEOUT_MS
+      }
+    );
 
     process.stdout.write("get_status:\n");
     process.stdout.write(`${extractText(status)}\n\n`);
