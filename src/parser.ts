@@ -269,33 +269,62 @@ function parseByLineMarkers(raw: string): ParsePagesResult {
   const warnings: string[] = [];
   const seenPaths = new Set<string>();
   const markerPattern = /^---\s+url:\s+(.+?)\s+---\s*$/;
+  const canonicalOpen = /^\s*---\s*$/;
+  const canonicalUrl = /^\s*url:\s*(.+?)\s*$/;
 
   let currentPath: string | null = null;
   let currentLines: string[] = [];
   let markerCount = 0;
 
-  for (const line of lines) {
-    const marker = line.match(markerPattern);
-    if (!marker) {
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    const singleLine = line.match(markerPattern);
+    if (singleLine) {
+      markerCount += 1;
       if (currentPath) {
-        currentLines.push(line);
+        const pageLines = trimBlankEdges(currentLines);
+        const pageRaw = pageLines.join("\n");
+        pages.push({
+          path: currentPath,
+          title: extractTitleFromLines(pageLines) ?? fallbackTitle(currentPath),
+          raw: pageRaw
+        });
       }
+
+      currentPath = uniquePath(normalizePath(singleLine[1]), seenPaths, warnings);
+      currentLines = [];
+      i += 1;
       continue;
     }
 
-    markerCount += 1;
-    if (currentPath) {
-      const pageLines = trimBlankEdges(currentLines);
-      const pageRaw = pageLines.join("\n");
-      pages.push({
-        path: currentPath,
-        title: extractTitleFromLines(pageLines) ?? fallbackTitle(currentPath),
-        raw: pageRaw
-      });
+    const next = lines[i + 1] ?? "";
+    const afterNext = lines[i + 2] ?? "";
+    if (canonicalOpen.test(line) && canonicalOpen.test(afterNext)) {
+      const urlLine = next.match(canonicalUrl);
+      if (urlLine) {
+        markerCount += 1;
+        if (currentPath) {
+          const pageLines = trimBlankEdges(currentLines);
+          const pageRaw = pageLines.join("\n");
+          pages.push({
+            path: currentPath,
+            title: extractTitleFromLines(pageLines) ?? fallbackTitle(currentPath),
+            raw: pageRaw
+          });
+        }
+
+        currentPath = uniquePath(normalizePath(urlLine[1]), seenPaths, warnings);
+        currentLines = [];
+        i += 3;
+        continue;
+      }
     }
 
-    currentPath = uniquePath(normalizePath(marker[1]), seenPaths, warnings);
-    currentLines = [];
+    if (currentPath) {
+      currentLines.push(line);
+    }
+    i += 1;
   }
 
   if (currentPath) {

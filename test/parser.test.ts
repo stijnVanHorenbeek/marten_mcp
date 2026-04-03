@@ -21,6 +21,29 @@ beta`;
     expect(result.pages[1]?.path).toBe("/beta.md");
   });
 
+  test("uses strict mode for canonical multi-line url markers", () => {
+    const raw = `---
+url: /alpha.md
+---
+# Alpha
+
+alpha
+
+---
+url: /beta.md
+---
+# Beta
+
+beta`;
+
+    const result = parsePagesWithDiagnostics(raw);
+    expect(result.diagnostics.mode).toBe("strict");
+    expect(result.pages.length).toBe(2);
+    expect(result.diagnostics.malformedMarkerCount).toBe(0);
+    expect(result.pages[0]?.path).toBe("/alpha.md");
+    expect(result.pages[1]?.path).toBe("/beta.md");
+  });
+
   test("falls back for frontmatter with extra fields and path key", () => {
     const raw = `---
 title: Alpha Page
