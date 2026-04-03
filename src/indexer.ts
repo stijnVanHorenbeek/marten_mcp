@@ -29,6 +29,16 @@ interface ScoredChunk {
   score: number;
 }
 
+interface QueryProfile {
+  raw: string;
+  lexicalTerms: string[];
+  trigramTerms: string[];
+  identifierTerms: string[];
+  queryClass: SearchMode;
+  symbolHeavy: boolean;
+  shortQuery: boolean;
+}
+
 export class HybridIndex {
   private readonly chunks: DocChunk[];
   private readonly byId: Map<string, DocChunk>;
@@ -59,15 +69,17 @@ export class HybridIndex {
   }
 
   public search(query: string, limit: number, mode: SearchMode = "auto", debug = false, offset = 0): SearchResult[] {
-    const trimmedQuery = query.trim();
-    const shortQuery = isShortQuery(trimmedQuery);
-    const symbolHeavy = isSymbolHeavyQuery(trimmedQuery);
+    const profile = buildQueryProfile(query);
+    const trimmedQuery = profile.raw;
+    const shortQuery = profile.shortQuery;
+    const symbolHeavy = profile.symbolHeavy;
     const flexiblePhraseMatch = symbolHeavy || shortQuery;
-    const queryKind = classifyQuery(trimmedQuery);
+    const queryKind = profile.queryClass;
     const useHybridAuto = mode === "auto" && !shortQuery;
     const decidedMode = mode === "auto" ? (shortQuery ? "exact" : queryKind) : mode;
-    const lexicalTerms = tokenize(trimmedQuery);
-    const trigramTerms = trigrams(trimmedQuery);
+    const lexicalTerms = profile.lexicalTerms;
+    const trigramTerms = profile.trigramTerms;
+    const identifierTerms = profile.identifierTerms;
 
     const lexicalCandidates = this.collectCandidates(this.lexicalPostings, lexicalTerms);
     const trigramCandidates = this.collectCandidates(this.trigramPostings, trigramTerms);
@@ -91,7 +103,17 @@ export class HybridIndex {
       trigramCandidates.forEach((id) => candidateIds.add(id));
     }
 
-    const scored: ScoredChunk[] = [];
+    const scoredById = new Map<
+      string,
+      {
+        chunk: DocChunk;
+        lexicalScore: number;
+        trigramScore: number;
+        phraseBoost: number;
+        codeBoost: number;
+      }
+    >();
+
     for (const id of candidateIds) {
       const indexed = this.preIndexed.get(id);
       if (!indexed) {
@@ -110,37 +132,56 @@ export class HybridIndex {
         flexiblePhraseMatch
       );
 
-      let score = lexicalScore * 0.65 + trigramScore * 0.35;
-      if (useHybridAuto) {
-        score =
-          queryKind === "lexical"
-            ? lexicalScore * 0.8 + trigramScore * 0.2
-            : lexicalScore * 0.35 + trigramScore * 0.65;
-      } else if (decidedMode === "lexical") {
-        score = lexicalScore;
-      } else if (decidedMode === "trigram") {
-        score = trigramScore;
-      } else if (decidedMode === "exact") {
-        score = isExactMatchCandidate(indexed.chunk, trimmedQuery, flexiblePhraseMatch) ? 1 + phraseBoost : 0;
-      } else {
-        score += phraseBoost;
-      }
-
       const codeBoost =
         queryIsCode &&
         indexed.chunk.code_text.length > 0 &&
         includesPhraseFlexible(indexed.chunk.code_text, trimmedQuery, flexiblePhraseMatch)
           ? Math.min(0.35, SEARCH_FIELD_WEIGHTS.code * 0.6)
           : 0;
-      if (codeBoost > 0) {
-        score += codeBoost;
+
+      scoredById.set(id, {
+        chunk: indexed.chunk,
+        lexicalScore,
+        trigramScore,
+        phraseBoost,
+        codeBoost
+      });
+    }
+
+    const lexicalRank = rankByScore(scoredById, (row) => row.lexicalScore + row.phraseBoost * 0.35 + row.codeBoost * 0.15);
+    const trigramRank = rankByScore(scoredById, (row) => row.trigramScore + row.phraseBoost * 0.2 + row.codeBoost * 0.3);
+    const scored: ScoredChunk[] = [];
+
+    for (const [id, row] of scoredById.entries()) {
+      let score = 0;
+
+      if (decidedMode === "lexical") {
+        score = row.lexicalScore + row.phraseBoost + row.codeBoost;
+      } else if (decidedMode === "trigram") {
+        score = row.trigramScore + row.phraseBoost * 0.5 + row.codeBoost;
+      } else if (decidedMode === "exact") {
+        score = isExactMatchCandidate(row.chunk, trimmedQuery, flexiblePhraseMatch) ? 1 + row.phraseBoost : 0;
+      } else {
+        const lexicalWeight = queryKind === "lexical" ? 0.7 : 0.35;
+        const trigramWeight = queryKind === "lexical" ? 0.3 : 0.65;
+        score =
+          lexicalWeight * reciprocalRank(lexicalRank.get(id)) +
+          trigramWeight * reciprocalRank(trigramRank.get(id)) +
+          row.phraseBoost * 0.55 +
+          row.codeBoost;
       }
+
+      score += identifierFieldBoost(row.chunk, identifierTerms);
+      score += requireSessionApiPenaltyOrBoost(row.chunk, identifierTerms);
+      score += genericDocsPenalty(row.chunk, identifierTerms, lexicalTerms);
+      score += queryIntentPathBoost(row.chunk, lexicalTerms, identifierTerms);
+      score *= genericPathCapMultiplier(row.chunk, lexicalTerms, identifierTerms);
 
       if (score > 0) {
         scored.push({
-          chunk: indexed.chunk,
-          lexicalScore,
-          trigramScore,
+          chunk: row.chunk,
+          lexicalScore: row.lexicalScore,
+          trigramScore: row.trigramScore,
           score
         });
       }
@@ -159,7 +200,8 @@ export class HybridIndex {
 
       return a.chunk.id.localeCompare(b.chunk.id);
     });
-    return scored.slice(offset, offset + limit).map((row) => ({
+    const deduped = dedupeByPath(scored);
+    return deduped.slice(offset, offset + limit).map((row) => ({
       id: row.chunk.id,
       path: row.chunk.path,
       title: row.chunk.title,
@@ -408,6 +450,17 @@ export function buildHybridIndexPersistedState(chunks: DocChunk[]): HybridIndexP
 }
 
 function classifyQuery(query: string): SearchMode {
+  const terms = tokenize(query);
+  const symbolHeavy = isSymbolHeavyQuery(query);
+  const hasSessionApiHints = /\bIDocumentSession\b|\bIQuerySession\b|\bLoadAsync\b|\bQuery\s*<|\bStore\s*\(/i.test(query);
+  if (hasSessionApiHints && terms.length >= 6) {
+    return "lexical";
+  }
+
+  if (terms.length >= 10 && !symbolHeavy) {
+    return "lexical";
+  }
+
   const codeHints = /[<>{}().;:=\[\]`]/.test(query);
   const pascalOrCamel = /[A-Za-z]+[A-Z][A-Za-z0-9]*/.test(query);
   const hasNamespace = /[A-Za-z0-9_]+\.[A-Za-z0-9_]+/.test(query);
@@ -589,4 +642,193 @@ function includesPhraseFlexible(haystack: string, query: string, flexibleMatch: 
 
 function normalizeSymbolic(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function buildQueryProfile(query: string): QueryProfile {
+  const raw = query.trim();
+  const cleaned = stripQueryNoise(raw);
+  const lexicalTerms = tokenize(cleaned);
+  const trigramTerms = trigrams(cleaned);
+  const identifierTerms = extractIdentifierTerms(raw);
+  return {
+    raw,
+    lexicalTerms,
+    trigramTerms,
+    identifierTerms,
+    queryClass: classifyQuery(raw),
+    symbolHeavy: isSymbolHeavyQuery(raw),
+    shortQuery: isShortQuery(raw)
+  };
+}
+
+function stripQueryNoise(query: string): string {
+  const noise = new Set([
+    "in",
+    "review",
+    "improvements",
+    "improvement",
+    "please",
+    "and",
+    "for",
+    "the",
+    "this",
+    "with",
+    "usage"
+  ]);
+
+  const terms = tokenize(query).filter((term) => !noise.has(term));
+  return terms.join(" ");
+}
+
+function extractIdentifierTerms(query: string): string[] {
+  const patterns = query.match(/[A-Za-z_][A-Za-z0-9_<>()\/.]*/g) ?? [];
+  const out = new Set<string>();
+  for (const token of patterns) {
+    if (/^[A-Z]/.test(token) || token.includes(".") || token.includes("<") || token.includes("(")) {
+      tokenize(token).forEach((term) => out.add(term));
+      out.add(token.toLowerCase());
+    }
+  }
+  return Array.from(out);
+}
+
+function rankByScore<T>(
+  scoredById: Map<string, T>,
+  scorer: (value: T) => number
+): Map<string, number> {
+  const rows = Array.from(scoredById.entries()).map(([id, value]) => ({ id, score: scorer(value) }));
+  rows.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  const rank = new Map<string, number>();
+  rows.forEach((row, index) => rank.set(row.id, index + 1));
+  return rank;
+}
+
+function reciprocalRank(rank: number | undefined): number {
+  if (!rank) {
+    return 0;
+  }
+  const k = 60;
+  return 1 / (k + rank);
+}
+
+function identifierFieldBoost(chunk: DocChunk, identifierTerms: string[]): number {
+  if (identifierTerms.length === 0) {
+    return 0;
+  }
+
+  const haystacks = [chunk.title, chunk.path, chunk.headings.join(" "), chunk.code_text, chunk.raw_text];
+  let matches = 0;
+  for (const term of identifierTerms) {
+    if (haystacks.some((field) => field.toLowerCase().includes(term))) {
+      matches += 1;
+    }
+  }
+
+  return Math.min(0.5, (matches / identifierTerms.length) * 0.4);
+}
+
+function requireSessionApiPenaltyOrBoost(chunk: DocChunk, identifierTerms: string[]): number {
+  const hasSessionIntent = identifierTerms.some((term) =>
+    ["idocumentsession", "iquerysession", "query", "loadasync"].includes(term)
+  );
+  if (!hasSessionIntent) {
+    return 0;
+  }
+
+  const hasSessionHit =
+    includesPhraseCaseInsensitive(chunk.raw_text, "IDocumentSession") ||
+    includesPhraseCaseInsensitive(chunk.raw_text, "IQuerySession") ||
+    includesPhraseCaseInsensitive(chunk.raw_text, "Query<") ||
+    includesPhraseCaseInsensitive(chunk.raw_text, "LoadAsync");
+
+  return hasSessionHit ? 0.45 : -0.32;
+}
+
+function genericDocsPenalty(chunk: DocChunk, identifierTerms: string[], lexicalTerms: string[]): number {
+  const path = chunk.path.toLowerCase();
+  const likelyGeneric =
+    path.includes("/getting-started") ||
+    path.includes("/migration-guide") ||
+    path.includes("/configuration/hostbuilder");
+
+  if (!likelyGeneric) {
+    return 0;
+  }
+
+  const hasStrongIdentifierHit = identifierTerms.some((term) => chunk.raw_text.toLowerCase().includes(term));
+  const hasTopicFocus = lexicalTerms.some((term) => chunk.path.toLowerCase().includes(term));
+  if (hasStrongIdentifierHit || hasTopicFocus) {
+    return 0;
+  }
+
+  return identifierTerms.length > 0 ? -0.45 : -0.22;
+}
+
+function dedupeByPath(rows: ScoredChunk[]): ScoredChunk[] {
+  const seen = new Set<string>();
+  const out: ScoredChunk[] = [];
+  for (const row of rows) {
+    if (seen.has(row.chunk.path)) {
+      continue;
+    }
+    seen.add(row.chunk.path);
+    out.push(row);
+  }
+  return out;
+}
+
+function queryIntentPathBoost(chunk: DocChunk, lexicalTerms: string[], identifierTerms: string[]): number {
+  const path = chunk.path.toLowerCase();
+  const hasSessionIntent = hasAny(identifierTerms, ["idocumentsession", "iquerysession", "query", "loadasync"]);
+  const hasProjectionIntent = hasAny(lexicalTerms, ["projection", "projections", "inline", "daemon"]);
+  const hasIndexIntent = hasAny(lexicalTerms, ["index", "indexing", "duplicated", "compiled"]);
+  const hasFetchLatestIntent = hasAny(lexicalTerms, ["fetchlatest", "fetch", "latest"]);
+  const hasReadAggregateIntent = hasAny(lexicalTerms, ["read", "aggregate", "aggregates"]);
+  const hasNaturalKeyIntent = hasAny(lexicalTerms, ["natural", "key", "keys"]);
+
+  let boost = 0;
+  if (hasSessionIntent && path.includes("/documents/sessions")) {
+    boost += 0.7;
+  }
+  if (hasSessionIntent && path.includes("/documents/querying")) {
+    boost += 0.25;
+  }
+  if (hasProjectionIntent && path.includes("/events/projections")) {
+    boost += 0.2;
+  }
+  if (hasIndexIntent && path.includes("/documents/indexing")) {
+    boost += 0.2;
+  }
+  if (hasFetchLatestIntent && hasReadAggregateIntent && path.includes("/events/projections/read-aggregates")) {
+    boost += 0.55;
+  }
+  if (hasFetchLatestIntent && hasNaturalKeyIntent && path.includes("/events/natural-keys")) {
+    boost += 0.55;
+  }
+
+  return boost;
+}
+
+function genericPathCapMultiplier(chunk: DocChunk, lexicalTerms: string[], identifierTerms: string[]): number {
+  const path = chunk.path.toLowerCase();
+  const generic =
+    path.includes("/getting-started") ||
+    path.includes("/migration-guide") ||
+    path.includes("/configuration/hostbuilder");
+  if (!generic) {
+    return 1;
+  }
+
+  const hasSessionIntent = hasAny(identifierTerms, ["idocumentsession", "iquerysession", "query", "loadasync"]);
+  const hasOptimizationIntent = hasAny(lexicalTerms, ["improvement", "improvements", "index", "projection", "query"]);
+  if (hasSessionIntent && hasOptimizationIntent) {
+    return 0.62;
+  }
+
+  return 1;
+}
+
+function hasAny(haystack: string[], needles: string[]): boolean {
+  const set = new Set(haystack.map((value) => value.toLowerCase()));
+  return needles.some((needle) => set.has(needle));
 }

@@ -282,4 +282,32 @@ Configuration text.`
     expect(secondPage[0]?.id).not.toBe(firstPage[0]?.id);
     expect(secondPage[0]?.id).not.toBe(firstPage[1]?.id);
   });
+
+  test("long review-style query favors sessions docs over generic pages", () => {
+    const chunks = chunkPages([
+      {
+        path: "/migration-guide.md",
+        title: "Migration Guide",
+        raw: `# Migration Guide\n\nThis page discusses improvements and upgrades in general terms.`
+      },
+      {
+        path: "/documents/sessions.md",
+        title: "Document Sessions",
+        raw: `# Document Sessions\n\nUse IDocumentSession for writes and IQuerySession for read-only querying. Query<T>() and LoadAsync are covered here.`
+      },
+      {
+        path: "/configuration/hostbuilder.md",
+        title: "Host Builder",
+        raw: `# Host Builder\n\nService registration and host setup.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const query =
+      "In PersonInformationService.cs, review IDocumentSession/IQuerySession usage and Marten query/index/projection improvements.";
+    const results = index.search(query, 5, "auto");
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]?.path).toBe("/documents/sessions.md");
+  });
 });

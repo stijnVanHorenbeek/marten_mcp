@@ -28,6 +28,8 @@
   "document aliases",
   "schema patching",
   "event store configuration",
-  "UseIdentityMapForAggregates",
-  "FetchLatest"
+  "UseIdentityMapForAggregates read aggregates",
+  "FetchLatest",
+  "FetchLatest by natural key",
+  "FetchLatest read aggregates"
 ]
