@@ -6,6 +6,16 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-04-03
+
+### Added
+- Added Windows quick install script at `scripts/quickinstall.ps1` that downloads release artifacts, installs a launcher, and prints MCP config snippets for OpenCode or Copilot.
+- Added a tiny smoke docs fixture at `eval/telemetry/smoke-llms.txt` for deterministic CI cache seeding.
+
+### Fixed
+- CI smoke steps now seed a local docs cache before running smoke checks, removing dependence on external docs origin availability during first-run startup.
+- Docs source URL can now be overridden with `MARTEN_MCP_SOURCE_URL` for controlled environments and smoke diagnostics.
+
 ## [0.2.5] - 2026-04-03
 
 ### Added
