@@ -234,6 +234,9 @@ Override with:
 
 ```bash
 MARTEN_MCP_CACHE_DIR=/some/path
+
+# optional docs source override (useful for CI/offline smoke)
+MARTEN_MCP_SOURCE_URL=https://example.com/llms-full.txt
 ```
 
 Storage mode controls:
