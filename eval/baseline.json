@@ -1,6 +1,6 @@
 [
   {
-    "query": "session.Query<User>()",
+    "query": "session.Query<User>() soft deletes",
     "expected": {
       "pathIncludes": "/documents/deletes.md",
       "headingIncludes": "Deleting Documents"
@@ -100,8 +100,8 @@
   {
     "query": "compiled queries",
     "expected": {
-      "pathIncludes": "/documents/querying/batched-queries.md",
-      "headingIncludes": "Batched Queries"
+      "pathIncludes": "/documents/querying/compiled-queries.md",
+      "headingIncludes": "Compiled Queries and Query Plans"
     }
   },
   {
@@ -112,7 +112,14 @@
     }
   },
   {
-    "query": "bulk insert",
+    "query": "how to bulk insert events?",
+    "expected": {
+      "pathIncludes": "/events/bulk-appending.md",
+      "headingIncludes": "Bulk Appending Events"
+    }
+  },
+  {
+    "query": "can you bulk insert documents",
     "expected": {
       "pathIncludes": "/documents/storing.md",
       "headingIncludes": "Storing Documents"
