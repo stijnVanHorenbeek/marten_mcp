@@ -1,0 +1,2 @@
+{"schema":"marten-mcp-telemetry","version":1,"event":{"tool":"search_docs","processId":100,"seq":1,"ts":"2026-04-03T00:00:00.000Z","query":"compiled queries","topResults":[{"id":"/documents/querying/compiled-queries.md::0","path":"/documents/querying/compiled-queries.md","score":4.5}]}}
+{"schema":"marten-mcp-telemetry","version":1,"event":{"tool":"read_section","processId":100,"seq":2,"ts":"2026-04-03T00:00:05.000Z","path":"/documents/querying/compiled-queries.md"}}

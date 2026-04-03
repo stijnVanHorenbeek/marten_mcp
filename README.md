@@ -73,6 +73,7 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 │   ├── lifecycle-lib.ts
 │   ├── lifecycle.sh
 │   ├── migrate-to-sqlite.ts
+│   ├── mine-eval-from-telemetry.ts
 │   ├── perf-smoke.ts
 │   ├── quickinstall.sh
 │   ├── smoke.ts
@@ -259,6 +260,26 @@ Optional ranking weight tuning (env vars):
 - `MARTEN_MCP_WEIGHT_PATH` (default `0.25`)
 - `MARTEN_MCP_WEIGHT_BODY` (default `0.15`)
 - `MARTEN_MCP_WEIGHT_CODE` (default `0.35`)
+
+Retrieval telemetry (for mining new eval cases):
+
+- Enabled by default, written to `~/.cache/marten-docs-mcp/telemetry.jsonl` (or your configured cache dir)
+- `MARTEN_MCP_TELEMETRY_PATH` overrides telemetry output path
+- `MARTEN_MCP_TELEMETRY_DISABLED=1` turns telemetry off
+
+## Eval mining from real usage
+
+You can mine candidate eval cases from telemetry logs:
+
+```bash
+# run server (telemetry is on by default)
+bun run dev
+
+# then mine query->path candidates from collected events
+bun run eval:mine -- --input ~/.cache/marten-docs-mcp/telemetry.jsonl --output eval/mined-candidates.json
+```
+
+The mined output includes `suggestedExpected` fields that can be copied into `eval/baseline.json`. For ambiguous queries, suggestions may include `pathAnyOf`.
 
 ## Example OpenCode MCP config
 

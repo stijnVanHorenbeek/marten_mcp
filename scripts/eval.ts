@@ -5,7 +5,8 @@ import { DocsService } from "../src/service.js";
 interface BaselineCase {
   query: string;
   expected: {
-    pathIncludes: string;
+    pathIncludes?: string;
+    pathAnyOf?: string[];
     headingIncludes?: string;
   };
 }
@@ -75,16 +76,14 @@ async function main(): Promise<void> {
     const top1 = results[0];
     const top3 = results.slice(0, 3);
 
-    const passTop1 = top1 ? isMatch(top1.path, top1.headings, expected.expected.pathIncludes, expected.expected.headingIncludes) : false;
-    const passTop3 = top3.some((result) =>
-      isMatch(result.path, result.headings, expected.expected.pathIncludes, expected.expected.headingIncludes)
-    );
+    const passTop1 = top1 ? isMatch(top1.path, top1.headings, expected.expected) : false;
+    const passTop3 = top3.some((result) => isMatch(result.path, result.headings, expected.expected));
 
     rows.push({
       query,
       passTop1,
       passTop3,
-      expectedPath: expected.expected.pathIncludes,
+      expectedPath: describeExpectedPaths(expected.expected),
       actualTop1Path: top1?.path ?? null
     });
   }
@@ -132,17 +131,40 @@ async function readBaseline(filePath: string): Promise<BaselineCase[]> {
   return parsed as BaselineCase[];
 }
 
-function isMatch(pathValue: string, headings: string[], expectedPathIncludes: string, expectedHeadingIncludes?: string): boolean {
-  const pathMatch = pathValue.toLowerCase().includes(expectedPathIncludes.toLowerCase());
+function isMatch(pathValue: string, headings: string[], expected: BaselineCase["expected"]): boolean {
+  const pathMatch = isPathMatch(pathValue, expected);
   if (!pathMatch) {
     return false;
   }
 
-  if (!expectedHeadingIncludes) {
+  if (!expected.headingIncludes) {
     return true;
   }
 
-  return headings.some((heading) => heading.toLowerCase().includes(expectedHeadingIncludes.toLowerCase()));
+  return headings.some((heading) => heading.toLowerCase().includes(expected.headingIncludes!.toLowerCase()));
+}
+
+function isPathMatch(pathValue: string, expected: BaselineCase["expected"]): boolean {
+  const lowerPath = pathValue.toLowerCase();
+  const pathAnyOf = expected.pathAnyOf ?? [];
+  if (pathAnyOf.length > 0) {
+    return pathAnyOf.some((candidate) => lowerPath.includes(candidate.toLowerCase()));
+  }
+
+  if (expected.pathIncludes) {
+    return lowerPath.includes(expected.pathIncludes.toLowerCase());
+  }
+
+  return false;
+}
+
+function describeExpectedPaths(expected: BaselineCase["expected"]): string {
+  const pathAnyOf = expected.pathAnyOf ?? [];
+  if (pathAnyOf.length > 0) {
+    return pathAnyOf.join(" | ");
+  }
+
+  return expected.pathIncludes ?? "<missing expected path>";
 }
 
 void main().catch((error) => {

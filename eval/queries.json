@@ -1,5 +1,5 @@
 [
-  "session.Query<User>()",
+  "session.Query<User>() soft deletes",
   "aggregate projections",
   "inline projections",
   "live aggregation",
@@ -15,7 +15,8 @@
   "query by id",
   "compiled queries",
   "patch api",
-  "bulk insert",
+  "how to bulk insert events?",
+  "can you bulk insert documents",
   "soft delete",
   "multi tenancy",
   "conjoined tenancy",

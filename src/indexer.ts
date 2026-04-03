@@ -245,7 +245,7 @@ export class HybridIndex {
   private build(): void {
     for (const chunk of this.chunks) {
       const lexicalSource = `${chunk.title}\n${chunk.headings.join(" ")}\n${chunk.path}\n${chunk.body_text}`;
-      const trigramSource = `${chunk.title}\n${chunk.headings.join(" ")}\n${chunk.path}\n${chunk.raw_text}`;
+      const trigramSource = `${chunk.title}\n${chunk.headings.join(" ")}\n${chunk.path}\n${chunk.body_text}\n${chunk.code_text}`;
 
       const lexicalTerms = tokenize(lexicalSource);
       const trigramTerms = trigrams(trigramSource);
