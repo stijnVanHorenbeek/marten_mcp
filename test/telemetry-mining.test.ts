@@ -117,7 +117,9 @@ describe("telemetry and eval mining", () => {
       minSearches: 2,
       minSelections: 1,
       windowMs: 120000,
-      minShare: 0.25
+      minShare: 0.25,
+      clusterSimilarity: 0.6,
+      clusterMinSharedTerms: 2
     };
 
     const result = await mineTelemetry(options);
@@ -130,5 +132,158 @@ describe("telemetry and eval mining", () => {
     expect(output.candidates.length).toBe(1);
     expect(output.candidates[0]?.query).toBe("compiled queries");
     expect(output.candidates[0]?.suggestedExpected.pathIncludes).toBe("/documents/querying/compiled-queries.md");
+  });
+
+  test("attributes read to search containing selected path", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "marten-mcp-mine-attribution-"));
+    tempDirs.push(tempDir);
+
+    const inputPath = path.join(tempDir, "telemetry.jsonl");
+    const outputPath = path.join(tempDir, "mined.json");
+    const lines = [
+      {
+        schema: "marten-mcp-telemetry",
+        version: 1,
+        event: {
+          tool: "search_docs",
+          processId: 42,
+          seq: 1,
+          ts: "2026-04-03T00:00:00.000Z",
+          query: "first query",
+          topResults: [{ id: "a", path: "/a.md", score: 1.0 }]
+        }
+      },
+      {
+        schema: "marten-mcp-telemetry",
+        version: 1,
+        event: {
+          tool: "search_docs",
+          processId: 42,
+          seq: 2,
+          ts: "2026-04-03T00:00:01.000Z",
+          query: "second query",
+          topResults: [{ id: "b", path: "/b.md", score: 1.0 }]
+        }
+      },
+      {
+        schema: "marten-mcp-telemetry",
+        version: 1,
+        event: {
+          tool: "read_section",
+          processId: 42,
+          seq: 3,
+          ts: "2026-04-03T00:00:02.000Z",
+          path: "/a.md"
+        }
+      }
+    ].map((row) => JSON.stringify(row));
+    await fs.writeFile(inputPath, `${lines.join("\n")}\n`, "utf8");
+
+    const options: CliOptions = {
+      input: inputPath,
+      output: outputPath,
+      minSearches: 1,
+      minSelections: 1,
+      windowMs: 120000,
+      minShare: 0.25,
+      clusterSimilarity: 0.6,
+      clusterMinSharedTerms: 2
+    };
+
+    const result = await mineTelemetry(options);
+    expect(result.minedCandidates).toBe(1);
+
+    const output = JSON.parse(await fs.readFile(outputPath, "utf8")) as {
+      candidates: Array<{ query: string; selections: number }>;
+    };
+
+    expect(output.candidates[0]?.query).toBe("first query");
+    expect(output.candidates[0]?.selections).toBe(1);
+  });
+
+  test("clusters similar queries before thresholding", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "marten-mcp-mine-cluster-"));
+    tempDirs.push(tempDir);
+
+    const inputPath = path.join(tempDir, "telemetry.jsonl");
+    const outputPath = path.join(tempDir, "mined.json");
+
+    const lines = [
+      {
+        schema: "marten-mcp-telemetry",
+        version: 1,
+        event: {
+          tool: "search_docs",
+          processId: 9,
+          seq: 1,
+          ts: "2026-04-03T00:00:00.000Z",
+          query: "Marten multi stream projection identity and DeleteEvent ShouldDelete",
+          topResults: [{ id: "a", path: "/events/projections/conventions.md", score: 2.1 }]
+        }
+      },
+      {
+        schema: "marten-mcp-telemetry",
+        version: 1,
+        event: {
+          tool: "read_section",
+          processId: 9,
+          seq: 2,
+          ts: "2026-04-03T00:00:01.000Z",
+          path: "/events/projections/conventions.md"
+        }
+      },
+      {
+        schema: "marten-mcp-telemetry",
+        version: 1,
+        event: {
+          tool: "search_docs",
+          processId: 9,
+          seq: 3,
+          ts: "2026-04-03T00:00:02.000Z",
+          query: "Marten MultiStreamProjection DeleteEvent behavior aggregate deletion",
+          topResults: [{ id: "b", path: "/events/projections/multi-stream-projections.md", score: 2.0 }]
+        }
+      },
+      {
+        schema: "marten-mcp-telemetry",
+        version: 1,
+        event: {
+          tool: "read_page",
+          processId: 9,
+          seq: 4,
+          ts: "2026-04-03T00:00:03.000Z",
+          path: "/events/projections/multi-stream-projections.md"
+        }
+      }
+    ].map((row) => JSON.stringify(row));
+
+    await fs.writeFile(inputPath, `${lines.join("\n")}\n`, "utf8");
+
+    const options: CliOptions = {
+      input: inputPath,
+      output: outputPath,
+      minSearches: 2,
+      minSelections: 2,
+      windowMs: 120000,
+      minShare: 0.25,
+      clusterSimilarity: 0.1,
+      clusterMinSharedTerms: 2
+    };
+
+    const result = await mineTelemetry(options);
+    expect(result.minedCandidates).toBe(1);
+
+    const output = JSON.parse(await fs.readFile(outputPath, "utf8")) as {
+      candidates: Array<{
+        searches: number;
+        selections: number;
+        queryVariants?: Array<{ query: string; count: number }>;
+      }>;
+    };
+
+    expect(output.candidates.length).toBe(1);
+    expect(output.candidates[0]?.searches).toBe(2);
+    expect(output.candidates[0]?.selections).toBe(2);
+    expect(output.candidates[0]?.queryVariants?.length).toBeGreaterThan(1);
   });
 });
