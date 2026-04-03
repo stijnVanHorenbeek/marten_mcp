@@ -6,6 +6,21 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-04-03
+
+### Added
+- Telemetry eval miner now supports clustering similar queries (term normalization + Jaccard thresholding) so mined candidates can accumulate across paraphrased search prompts.
+- Telemetry mining output now includes `queryVariants` to show which query phrasings were grouped into each candidate.
+
+### Changed
+- Retrieval ranking was tuned for long, context-heavy prompts with query profiling, hybrid rank fusion, intent-aware boosts/penalties, and path-level deduplication.
+- Eval baselines and queries were updated for ambiguous `FetchLatest` intent and more realistic phrasing (`pathAnyOf` for shared intent pages).
+- Mined eval outputs are now directed to `eval/generated/` and ignored in git to keep generated artifacts out of tracked changes.
+
+### Fixed
+- MCP server startup no longer blocks on initial docs fetch/index build, reducing first-run smoke timeout flakiness in CI.
+- Smoke script timeout handling and budget were hardened (`300s`) to avoid first-attempt request timeouts on cold runners.
+
 ## [0.2.4] - 2026-04-03
 
 ### Changed
