@@ -23,7 +23,8 @@
     "upgrade:local": "bun run scripts/upgrade.ts",
     "verify:local": "bun run scripts/verify.ts",
     "eval": "bun run scripts/eval.ts",
-    "eval:record": "bun run scripts/eval.ts --record"
+    "eval:record": "bun run scripts/eval.ts --record",
+    "eval:mine": "bun run scripts/mine-eval-from-telemetry.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

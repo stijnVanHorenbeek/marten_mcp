@@ -1,7 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { logInfo } from "./logger.js";
 import { DocsService } from "./service.js";
+import { createTelemetrySinkFromEnv } from "./telemetry.js";
 import type { ContextMode, DocChunk, PageSummary, SearchMode, SearchResult, StatusReport } from "./types.js";
 
 const SEARCH_MODES = ["auto", "lexical", "trigram", "exact"] as const;
@@ -15,6 +17,10 @@ const MAX_CODE_TEXT_CHARS = 700;
 export async function startMcpServer(): Promise<void> {
   const service = new DocsService();
   await service.initialize();
+  const telemetry = createTelemetrySinkFromEnv();
+  if (telemetry) {
+    logInfo("Telemetry enabled", { filePath: telemetry.getFilePath() });
+  }
 
   const server = new McpServer(
     {
@@ -64,6 +70,20 @@ export async function startMcpServer(): Promise<void> {
         count: results.length,
         results
       };
+      telemetry?.record({
+        tool: "search_docs",
+        query,
+        mode: mode ?? "auto",
+        limit: limit ?? 8,
+        offset: safeOffset,
+        debug: debugEnabled,
+        count: results.length,
+        topResults: results.slice(0, 5).map((row) => ({
+          id: row.id,
+          path: row.path,
+          score: row.score
+        }))
+      });
       return {
         content: [
           {
@@ -89,6 +109,12 @@ export async function startMcpServer(): Promise<void> {
           error: "not_found",
           id
         };
+      telemetry?.record({
+        tool: "read_section",
+        id,
+        found: chunk !== null,
+        path: chunk?.path ?? null
+      });
       return {
         content: [
           {
@@ -133,6 +159,16 @@ export async function startMcpServer(): Promise<void> {
         count: context.length,
         chunks: context.map(toBoundedChunk)
       };
+      telemetry?.record({
+        tool: "read_context",
+        id,
+        before: before ?? 1,
+        after: after ?? 1,
+        contextMode: mode,
+        count: context.length,
+        chunkIds: context.map((chunk) => chunk.id),
+        paths: Array.from(new Set(context.map((chunk) => chunk.path)))
+      });
       return {
         content: [
           {
@@ -186,6 +222,13 @@ export async function startMcpServer(): Promise<void> {
         count: chunks.length,
         chunks: chunks.map(toBoundedChunk)
       };
+      telemetry?.record({
+        tool: "read_page",
+        path,
+        maxChunks: maxChunks ?? 12,
+        count: chunks.length,
+        chunkIds: chunks.map((chunk) => chunk.id)
+      });
       return {
         content: [
           {
