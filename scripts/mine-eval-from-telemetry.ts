@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-interface CliOptions {
+export interface CliOptions {
   input: string;
   output: string;
   minSearches: number;
@@ -60,7 +60,7 @@ interface QueryStats {
   selectedPathCounts: Map<string, number>;
 }
 
-interface MinedCandidate {
+export interface MinedCandidate {
   query: string;
   searches: number;
   selections: number;
@@ -72,8 +72,19 @@ interface MinedCandidate {
   };
 }
 
-async function main(): Promise<void> {
-  const options = parseArgs(process.argv.slice(2));
+interface MineOutput {
+  generatedAt: string;
+  options: CliOptions;
+  candidates: MinedCandidate[];
+}
+
+interface MineRunResult {
+  parsedEvents: number;
+  minedCandidates: number;
+  outputPath: string;
+}
+
+export async function mineTelemetry(options: CliOptions): Promise<MineRunResult> {
   const lines = (await fs.readFile(options.input, "utf8")).split(/\r?\n/);
   const events = lines
     .map((line) => line.trim())
@@ -162,12 +173,29 @@ async function main(): Promise<void> {
     return b.selections - a.selections;
   });
 
-  await fs.mkdir(path.dirname(options.output), { recursive: true });
-  await fs.writeFile(options.output, `${JSON.stringify({ generatedAt: new Date().toISOString(), options, candidates }, null, 2)}\n`, "utf8");
+  const output: MineOutput = {
+    generatedAt: new Date().toISOString(),
+    options,
+    candidates
+  };
 
-  process.stdout.write(`Telemetry lines parsed: ${events.length}\n`);
-  process.stdout.write(`Mined candidates: ${candidates.length}\n`);
-  process.stdout.write(`Output: ${options.output}\n`);
+  await fs.mkdir(path.dirname(options.output), { recursive: true });
+  await fs.writeFile(options.output, `${JSON.stringify(output, null, 2)}\n`, "utf8");
+
+  return {
+    parsedEvents: events.length,
+    minedCandidates: candidates.length,
+    outputPath: options.output
+  };
+}
+
+async function main(): Promise<void> {
+  const options = parseArgs(process.argv.slice(2));
+  const result = await mineTelemetry(options);
+
+  process.stdout.write(`Telemetry lines parsed: ${result.parsedEvents}\n`);
+  process.stdout.write(`Mined candidates: ${result.minedCandidates}\n`);
+  process.stdout.write(`Output: ${result.outputPath}\n`);
 }
 
 function parseArgs(args: string[]): CliOptions {
@@ -345,8 +373,10 @@ function round(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
-void main().catch((error) => {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error);
-  process.stderr.write(`[mine-eval] failed: ${message}\n`);
-  process.exitCode = 1;
-});
+if (import.meta.main) {
+  void main().catch((error) => {
+    const message = error instanceof Error ? error.stack ?? error.message : String(error);
+    process.stderr.write(`[mine-eval] failed: ${message}\n`);
+    process.exitCode = 1;
+  });
+}

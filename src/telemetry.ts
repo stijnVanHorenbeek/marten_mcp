@@ -157,6 +157,10 @@ export class TelemetrySink {
     return this.filePath;
   }
 
+  public async flush(): Promise<void> {
+    await this.queue;
+  }
+
   private nextSequence(): number {
     this.sequence += 1;
     return this.sequence;
