@@ -20,6 +20,18 @@ Install a specific version:
 curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh -s -- --version v0.2.1
 ```
 
+Windows PowerShell quick install:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.ps1)))
+```
+
+Windows PowerShell with Copilot snippet:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.ps1))) -Client copilot
+```
+
 This installs the launcher and prints an OpenCode `opencode.jsonc` snippet (`mcp` section) you can paste into your client config.
 
 ## Example skill
@@ -76,6 +88,7 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 │   ├── mine-eval-from-telemetry.ts
 │   ├── perf-smoke.ts
 │   ├── quickinstall.sh
+│   ├── quickinstall.ps1
 │   ├── smoke.ts
 │   ├── uninstall.ts
 │   ├── upgrade.ts
