@@ -5,7 +5,7 @@ import type { CachePaths, SearchFieldWeights, SqliteDriver, StorageMode } from "
 export const SOURCE_URL = "https://martendb.io/llms-full.txt";
 export const SOFT_TTL_MS = 12 * 60 * 60 * 1000;
 export const HARD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-export const PARSER_VERSION = "v1";
+export const PARSER_VERSION = "v2";
 export const INDEX_VERSION = "v1";
 export const SEARCH_FIELD_WEIGHTS: SearchFieldWeights = {
   title: parseEnvWeight("MARTEN_MCP_WEIGHT_TITLE", 0.4),
