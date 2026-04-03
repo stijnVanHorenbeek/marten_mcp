@@ -19,6 +19,24 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Seed docs cache for smoke
+        run: |
+          mkdir -p "$HOME/.cache/marten-docs-mcp"
+          cp eval/telemetry/smoke-llms.txt "$HOME/.cache/marten-docs-mcp/llms-full.txt"
+          cat > "$HOME/.cache/marten-docs-mcp/metadata.json" <<EOF
+          {
+            "sourceUrl": "https://martendb.io/llms-full.txt",
+            "fetchedAt": "2030-01-01T00:00:00.000Z",
+            "lastValidatedAt": "2030-01-01T00:00:00.000Z",
+            "etag": null,
+            "lastModified": null,
+            "sha256": "seeded-for-ci",
+            "chunkCount": 1,
+            "parserVersion": "v2",
+            "indexVersion": "v1"
+          }
+          EOF
+
       - name: Run tests
         run: bun test
 
@@ -56,6 +74,24 @@ jobs:
 
       - name: Install dependencies
         run: bun install
+
+      - name: Seed docs cache for smoke
+        run: |
+          mkdir -p "$HOME/.cache/marten-docs-mcp"
+          cp eval/telemetry/smoke-llms.txt "$HOME/.cache/marten-docs-mcp/llms-full.txt"
+          cat > "$HOME/.cache/marten-docs-mcp/metadata.json" <<EOF
+          {
+            "sourceUrl": "https://martendb.io/llms-full.txt",
+            "fetchedAt": "2030-01-01T00:00:00.000Z",
+            "lastValidatedAt": "2030-01-01T00:00:00.000Z",
+            "etag": null,
+            "lastModified": null,
+            "sha256": "seeded-for-ci",
+            "chunkCount": 1,
+            "parserVersion": "v2",
+            "indexVersion": "v1"
+          }
+          EOF
 
       - name: Build release artifacts
         run: bun run build:release

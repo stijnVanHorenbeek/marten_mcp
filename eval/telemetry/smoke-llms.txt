@@ -1,0 +1,17 @@
+---
+url: /events/projections/aggregate-projections.md
+---
+# Aggregate Projections
+
+Aggregate projections combine event streams into read models.
+
+## Aggregate by Stream
+
+Use aggregate projections for lifecycle and snapshot style projections.
+
+---
+url: /events/projections.md
+---
+# Projections
+
+Marten supports inline and async projections.
