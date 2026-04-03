@@ -16,7 +16,10 @@ const MAX_CODE_TEXT_CHARS = 700;
 
 export async function startMcpServer(): Promise<void> {
   const service = new DocsService();
-  await service.initialize();
+  void service.initialize().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    logInfo("Deferred initialize failed; service will retry on demand", { error: message });
+  });
   const telemetry = createTelemetrySinkFromEnv();
   if (telemetry) {
     logInfo("Telemetry enabled", { filePath: telemetry.getFilePath() });
