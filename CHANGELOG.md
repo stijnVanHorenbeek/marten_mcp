@@ -6,6 +6,14 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-04-03
+
+### Changed
+- Parser and chunking pipeline refactored to structural blocks with fence-aware heading parsing, admonition normalization, and boilerplate stripping.
+- Chunk generation now preserves heading ancestry and uses block-aware splitting for improved retrieval boundaries.
+- Trigram indexing now uses normalized prose plus extracted code (`body_text` + `code_text`) instead of raw fenced markdown.
+- Eval queries were refined to more realistic intent phrasing and baseline expectations were aligned to canonical doc pages.
+
 ## [0.2.2] - 2026-04-03
 
 ### Added
