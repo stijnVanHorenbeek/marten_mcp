@@ -17,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master
 Install a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh -s -- --version v0.2.1
+curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.sh | sh -s -- --version v0.2.6
 ```
 
 Windows PowerShell quick install:
@@ -33,6 +33,16 @@ Windows PowerShell with Copilot snippet:
 ```
 
 This installs the launcher and prints an OpenCode `opencode.jsonc` snippet (`mcp` section) you can paste into your client config.
+
+PowerShell installer options (examples):
+
+```powershell
+# pin version
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.ps1))) -Version v0.2.6
+
+# print Copilot-shaped snippet
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.ps1))) -Client copilot
+```
 
 ## Example skill
 
@@ -116,49 +126,42 @@ This is a local MCP server that keeps a cached copy of `https://martendb.io/llms
 
 ## Run and build
 
+For contributors, the only day-to-day commands you usually need are:
+
 ```bash
 bun install
 bun run dev
 ```
 
-Build Node-compatible JS:
+Optional local checks:
 
 ```bash
-bun run build
-node dist/index.js
+# tests
+bun test
+
+# MCP smoke check over stdio
+bun run smoke
 ```
 
-Build Node-compatible JS without sourcemaps (release-oriented):
+Build commands are mainly for release and packaging workflows:
 
 ```bash
-bun run build:dist:release
-```
-
-Create a minified distributable bundle:
-
-```bash
-bun run build:bundle
-node bundle/index.js
-
-# debug bundle with sourcemap
-bun run build:bundle:debug
-
-# full release build (tsc + bundle)
+# full release artifacts (dist + bundle)
 bun run build:release
+
+# run bundle directly
+node bundle/index.js
 ```
 
-Notes:
-
-- The bundle intentionally keeps `bun:sqlite` and `node:sqlite` as runtime externals.
-- Node sqlite mode requires Node 22+ (`node:sqlite`).
-
-Clean build/test artifacts:
-
-```bash
-bun run clean
-```
+If you are not working on release/install behavior, you can ignore the other build variants.
 
 ## Install lifecycle scripts
+
+These lifecycle scripts install from `bundle/index.js`, so build the bundle first:
+
+```bash
+bun run build:release
+```
 
 Primary workflow (TS scripts):
 
@@ -168,6 +171,12 @@ bun run verify:local
 bun run upgrade:local
 bun run uninstall:local
 ```
+
+Important:
+
+- `install:local` fails if `bundle/index.js` is missing.
+- `upgrade:local` also expects the current repo to have a built `bundle/index.js`.
+- `verify:local` executes the installed launcher and calls MCP tools (`get_status`, `search_docs`).
 
 POSIX wrappers (call TS scripts):
 
@@ -297,30 +306,41 @@ bun run eval:mine -- --input ~/.cache/marten-docs-mcp/telemetry.jsonl --output e
 
 The mined output includes `suggestedExpected` fields that can be copied into `eval/baseline.json`. For ambiguous queries, suggestions may include `pathAnyOf`.
 
-## Example OpenCode MCP config
+## Example MCP config
+
+OpenCode (`opencode.jsonc` shape):
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "marten-docs": {
-      "command": "bun",
-      "args": ["run", "src/index.ts"],
-      "env": {
-        "MARTEN_MCP_CACHE_DIR": "~/.cache/marten-docs-mcp"
+      "type": "local",
+      "command": ["marten-docs-mcp"],
+      "environment": {
+        "MARTEN_MCP_CACHE_DIR": "~/.cache/marten-docs-mcp",
+        "MARTEN_MCP_STORAGE_MODE": "auto",
+        "MARTEN_MCP_SQLITE_PATH": "~/.cache/marten-docs-mcp/cache.db"
       }
     }
   }
 }
 ```
 
-If you prefer Node runtime from built files:
+GitHub Copilot Chat (`mcpServers` shape):
 
 ```json
 {
   "mcpServers": {
     "marten-docs": {
-      "command": "node",
-      "args": ["dist/index.js"]
+      "type": "local",
+      "command": "marten-docs-mcp",
+      "args": [],
+      "env": {
+        "MARTEN_MCP_CACHE_DIR": "~/.cache/marten-docs-mcp",
+        "MARTEN_MCP_STORAGE_MODE": "auto",
+        "MARTEN_MCP_SQLITE_PATH": "~/.cache/marten-docs-mcp/cache.db"
+      },
+      "tools": ["*"]
     }
   }
 }
@@ -472,14 +492,14 @@ Flow 4: human-readable output for interactive troubleshooting
     "lastModified": "Wed, 01 Apr 2026 14:20:00 GMT",
     "sha256": "...",
     "chunkCount": 742,
-    "parserVersion": "v1",
+    "parserVersion": "v2",
     "indexVersion": "v1"
   },
   "index": {
     "ready": true,
     "chunkCount": 742,
     "pageCount": 121,
-    "parserVersion": "v1",
+    "parserVersion": "v2",
     "indexVersion": "v1",
     "parseDiagnostics": {
       "mode": "strict",
@@ -512,4 +532,5 @@ Flow 4: human-readable output for interactive troubleshooting
 - GitHub Actions workflow: `.github/workflows/ci.yml`.
 - Bun job gates: `bun test`, `bun run build:release`, smoke against bundled runtime (`bun-bundle`).
 - Node compatibility job gates: `bun run build:release`, smoke against bundled runtime (`node-bundle`) with sqlite mode.
+- Both smoke jobs seed a tiny local docs corpus (`eval/telemetry/smoke-llms.txt`) into cache so first-run smoke is deterministic and not dependent on remote docs availability.
 - Release workflow: `.github/workflows/release.yml` (triggered by `v*.*.*` tags; validates tag/version match).
