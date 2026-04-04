@@ -94,7 +94,7 @@ Configuration text.`
     expect(context.every((chunk) => chunk.headings.includes("Lifecycle"))).toBe(true);
   });
 
-  test("read context can scope to full page with contextMode page", () => {
+  test("read context remains section-scoped", () => {
     const chunks = chunkPages([
       {
         path: "/events/aggregate-projections.md",
@@ -115,9 +115,9 @@ Configuration text.`
     const lifecycleChunk = chunks.find((chunk) => chunk.headings.includes("Lifecycle"));
     expect(lifecycleChunk).toBeTruthy();
 
-    const context = index.getContext(lifecycleChunk!.id, 10, 10, "page");
-    expect(context.length).toBeGreaterThan(1);
-    expect(context.some((chunk) => chunk.headings.includes("Configuration"))).toBe(true);
+    const context = index.getContext(lifecycleChunk!.id, 10, 10, "section");
+    expect(context.length).toBeGreaterThan(0);
+    expect(context.some((chunk) => chunk.headings.includes("Configuration"))).toBe(false);
   });
 
   test("exact phrase boosts title and heading matches", () => {
@@ -177,8 +177,64 @@ Configuration text.`
 
     expect(results.length).toBeGreaterThan(0);
     expect(results[0]?.debug).toBeTruthy();
-    expect(results[0]?.debug?.decidedMode).toBe("lexical");
+    expect(results[0]?.debug?.decidedMode).toBe("auto");
+    expect(results[0]?.debug?.autoBlend).toBe(true);
     expect(typeof results[0]?.debug?.phraseBoost).toBe("number");
+  });
+
+  test("auto mode uses blended ranking for mixed queries", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/aggregate-projections.md",
+        title: "Aggregate Projections",
+        raw: `# Aggregate Projections\n\nLifecycle and snapshot guidance.`
+      },
+      {
+        path: "/documents/querying.md",
+        title: "Querying",
+        raw: `# Querying\n\nUse session.Query<User>() for read models.`
+      },
+      {
+        path: "/events/projections/read-models.md",
+        title: "Read Models",
+        raw: `# Read Models\n\nUse aggregate projections and session.Query<User>() together.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const results = index.search("aggregate projections session.Query<User>()", 5, "auto", true);
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]?.debug?.decidedMode).toBe("auto");
+    expect(results[0]?.debug?.autoBlend).toBe(true);
+    expect(results.some((row) => row.path === "/events/projections/read-models.md")).toBe(true);
+  });
+
+  test("auto mode biases trigram when lexical evidence is absent", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/projections/aggregate-projections.md",
+        title: "Aggregate Projections",
+        raw: `# Aggregate Projections\n\nProjection lifecycle guidance and aggregate behavior.`
+      },
+      {
+        path: "/documents/querying.md",
+        title: "Querying",
+        raw: `# Querying\n\nLINQ session querying patterns.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const query = "agregate projeccions lifecyle";
+    const lexical = index.search(query, 3, "lexical");
+    const trigram = index.search(query, 3, "trigram");
+    const auto = index.search(query, 3, "auto", true);
+
+    expect(lexical.length).toBe(0);
+    expect(trigram.length).toBeGreaterThan(0);
+    expect(auto.length).toBeGreaterThan(0);
+    expect(auto[0]?.path).toBe(trigram[0]?.path);
+    expect(auto[0]?.debug?.autoBlend).toBe(true);
   });
 
   test("symbol-heavy exact query matches flexible code formatting", () => {
@@ -202,7 +258,7 @@ Configuration text.`
     expect(results[0]?.path).toBe("/documents/querying.md");
   });
 
-  test("mixed prose and code query favors chunk containing both", () => {
+  test("mixed prose and code query keeps combined-content page in top results", () => {
     const chunks = chunkPages([
       {
         path: "/events/aggregate-projections.md",
@@ -222,10 +278,11 @@ Configuration text.`
     ]);
 
     const index = new HybridIndex(chunks);
-    const results = index.search("aggregate projections session.Query<User>()", 3, "auto");
+    const results = index.search("aggregate projections session.Query<User>()", 3, "auto", true);
 
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0]?.path).toBe("/events/projections/aggregate-projections.md");
+    expect(results[0]?.debug?.decidedMode).toBe("auto");
+    expect(results.some((row) => row.path === "/events/projections/aggregate-projections.md")).toBe(true);
   });
 
   test("list pages supports prefix filtering and limits", () => {
@@ -244,6 +301,11 @@ Configuration text.`
         path: "/documents/a.md",
         title: "Documents A",
         raw: `# Documents A\n\nGamma`
+      },
+      {
+        path: "/archive/events/history.md",
+        title: "History",
+        raw: `# History\n\nShould not match prefix /events`
       }
     ]);
 
@@ -251,7 +313,26 @@ Configuration text.`
     const pages = index.listPages("/events", 1);
 
     expect(pages.length).toBe(1);
-    expect(pages[0]?.path).toContain("/events/");
+    expect(pages[0]?.path.startsWith("/events")).toBe(true);
+  });
+
+  test("search within page returns chunk-level results with offset", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/aggregate-projections.md",
+        title: "Aggregate Projections",
+        raw: `# Aggregate Projections\n\n## Lifecycle\n\naggregate projections lifecycle\n\n## Runtime\n\naggregate projections runtime`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const first = index.searchWithinPage("/events/aggregate-projections.md", "aggregate projections", 1, "auto", false, 0);
+    const second = index.searchWithinPage("/events/aggregate-projections.md", "aggregate projections", 1, "auto", false, 1);
+
+    expect(first.length).toBe(1);
+    expect(second.length).toBe(1);
+    expect(first[0]?.path).toBe("/events/aggregate-projections.md");
+    expect(second[0]?.id).not.toBe(first[0]?.id);
   });
 
   test("search supports offset paging", () => {

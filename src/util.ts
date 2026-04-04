@@ -50,6 +50,36 @@ export function includesPhraseCaseInsensitive(haystack: string, needle: string):
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
+export function paginateTextWindow(
+  value: string,
+  offset: number,
+  maxChars: number,
+  minChars = 200,
+  maxAllowedChars = 8_000
+): {
+  value: string;
+  offset: number;
+  length: number;
+  nextOffset: number | null;
+  hasMore: boolean;
+  totalChars: number;
+} {
+  const safeOffset = Math.max(0, Math.min(offset, value.length));
+  const safeMaxChars = Math.max(minChars, Math.min(maxChars, maxAllowedChars));
+  const end = Math.min(value.length, safeOffset + safeMaxChars);
+  const slice = value.slice(safeOffset, end);
+  const hasMore = end < value.length;
+
+  return {
+    value: slice,
+    offset: safeOffset,
+    length: slice.length,
+    nextOffset: hasMore ? end : null,
+    hasMore,
+    totalChars: value.length
+  };
+}
+
 function expandToken(token: string): string[] {
   const base = token.toLowerCase();
   const variants = new Set<string>([base]);

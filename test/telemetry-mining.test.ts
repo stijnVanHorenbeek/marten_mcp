@@ -26,17 +26,18 @@ describe("telemetry and eval mining", () => {
     const sink = new TelemetrySink(filePath);
     sink.record({
       tool: "search_docs",
-      query: "compiled queries",
+      queryTerms: ["compiled", "queries"],
       mode: "auto",
       limit: 8,
       offset: 0,
       debug: false,
       count: 1,
-      topResults: [{ id: "chunk-1", path: "/documents/querying/compiled-queries.md", score: 4.2 }]
+      topResultPaths: ["/documents/querying/compiled-queries.md"]
     });
     sink.record({
       tool: "read_section",
       id: "chunk-1",
+      field: "raw_text",
       found: true,
       path: "/documents/querying/compiled-queries.md"
     });
@@ -47,10 +48,10 @@ describe("telemetry and eval mining", () => {
     const lines = content.trim().split(/\r?\n/);
     expect(lines.length).toBe(2);
 
-    const first = JSON.parse(lines[0]) as { event?: { tool?: string; query?: string } };
+    const first = JSON.parse(lines[0]) as { event?: { tool?: string; queryTerms?: string[] } };
     const second = JSON.parse(lines[1]) as { event?: { tool?: string; path?: string } };
     expect(first.event?.tool).toBe("search_docs");
-    expect(first.event?.query).toBe("compiled queries");
+    expect(first.event?.queryTerms).toEqual(["compiled", "queries"]);
     expect(second.event?.tool).toBe("read_section");
     expect(second.event?.path).toBe("/documents/querying/compiled-queries.md");
   });
@@ -70,8 +71,8 @@ describe("telemetry and eval mining", () => {
           processId: 42,
           seq: 1,
           ts: "2026-04-03T00:00:00.000Z",
-          query: "compiled queries",
-          topResults: [{ id: "c1", path: "/documents/querying/compiled-queries.md", score: 4.5 }]
+          queryTerms: ["compiled", "queries"],
+          topResultPaths: ["/documents/querying/compiled-queries.md"]
         }
       },
       {
@@ -93,19 +94,21 @@ describe("telemetry and eval mining", () => {
           processId: 42,
           seq: 3,
           ts: "2026-04-03T00:00:10.000Z",
-          query: "compiled queries",
-          topResults: [{ id: "c2", path: "/documents/querying/compiled-queries.md", score: 4.4 }]
+          queryTerms: ["compiled", "queries"],
+          topResultPaths: ["/documents/querying/compiled-queries.md"]
         }
       },
       {
         schema: "marten-mcp-telemetry",
         version: 1,
         event: {
-          tool: "read_page",
+          tool: "search_within_page",
           processId: 42,
           seq: 4,
           ts: "2026-04-03T00:00:12.000Z",
-          path: "/documents/querying/compiled-queries.md"
+          path: "/documents/querying/compiled-queries.md",
+          queryTerms: ["compiled", "queries"],
+          topChunkIds: ["c2"]
         }
       }
     ].map((row) => JSON.stringify(row));
@@ -149,8 +152,8 @@ describe("telemetry and eval mining", () => {
           processId: 42,
           seq: 1,
           ts: "2026-04-03T00:00:00.000Z",
-          query: "first query",
-          topResults: [{ id: "a", path: "/a.md", score: 1.0 }]
+          queryTerms: ["first", "query"],
+          topResultPaths: ["/a.md"]
         }
       },
       {
@@ -161,8 +164,8 @@ describe("telemetry and eval mining", () => {
           processId: 42,
           seq: 2,
           ts: "2026-04-03T00:00:01.000Z",
-          query: "second query",
-          topResults: [{ id: "b", path: "/b.md", score: 1.0 }]
+          queryTerms: ["second", "query"],
+          topResultPaths: ["/b.md"]
         }
       },
       {
@@ -217,8 +220,8 @@ describe("telemetry and eval mining", () => {
           processId: 9,
           seq: 1,
           ts: "2026-04-03T00:00:00.000Z",
-          query: "Marten multi stream projection identity and DeleteEvent ShouldDelete",
-          topResults: [{ id: "a", path: "/events/projections/conventions.md", score: 2.1 }]
+          queryTerms: ["marten", "multi", "stream", "projection", "identity", "deleteevent", "shoulddelete"],
+          topResultPaths: ["/events/projections/conventions.md"]
         }
       },
       {
@@ -240,19 +243,21 @@ describe("telemetry and eval mining", () => {
           processId: 9,
           seq: 3,
           ts: "2026-04-03T00:00:02.000Z",
-          query: "Marten MultiStreamProjection DeleteEvent behavior aggregate deletion",
-          topResults: [{ id: "b", path: "/events/projections/multi-stream-projections.md", score: 2.0 }]
+          queryTerms: ["marten", "multi", "stream", "projection", "deleteevent", "aggregate", "deletion"],
+          topResultPaths: ["/events/projections/multi-stream-projections.md"]
         }
       },
       {
         schema: "marten-mcp-telemetry",
         version: 1,
         event: {
-          tool: "read_page",
+          tool: "search_within_page",
           processId: 9,
           seq: 4,
           ts: "2026-04-03T00:00:03.000Z",
-          path: "/events/projections/multi-stream-projections.md"
+          path: "/events/projections/multi-stream-projections.md",
+          queryTerms: ["deleteevent"],
+          topChunkIds: ["b"]
         }
       }
     ].map((row) => JSON.stringify(row));

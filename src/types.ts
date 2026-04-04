@@ -52,8 +52,15 @@ export interface PageSummary {
   chunkCount: number;
 }
 
+export interface HeadingSummary {
+  headingKey: string;
+  headings: string[];
+  firstChunkId: string;
+  chunkCount: number;
+}
+
 export type SearchMode = "auto" | "lexical" | "trigram" | "exact";
-export type ContextMode = "section" | "page";
+export type ContextMode = "section";
 
 export interface SearchFieldWeights {
   title: number;
@@ -75,6 +82,7 @@ export interface SearchResult {
   debug?: {
     decidedMode: SearchMode;
     queryClass: SearchMode;
+    autoBlend: boolean;
     phraseBoost: number;
     codeBoost: number;
     shortQueryFallback: boolean;
