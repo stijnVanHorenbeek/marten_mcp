@@ -6,6 +6,27 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-04-04
+
+### Added
+- Added `CONTRIBUTING.md` and split companion docs under `docs/` (`configuration`, `evals`, `lifecycle`, `troubleshooting`) to separate user-facing guidance from contributor/operations material.
+- Added focused retrieval tools and surfaces for page narrowing: `list_headings` and `search_within_page`.
+- Added paginated section reads via `read_section(id, field, offset, maxChars)` window metadata (`nextOffset`, `hasMore`).
+
+### Changed
+- `search_docs(mode="auto")` now uses genuine hybrid lexical+trigram blending, with query-kind weighting and typo-aware trigram biasing when lexical evidence is weak.
+- Top-level `README.md` is now concise and user-facing, with companion-doc links for advanced workflows.
+- Eval record flow now defaults to candidate baseline output and requires explicit acknowledgement flags to overwrite canonical baseline.
+- Telemetry now records minimized retrieval metadata and uses daily JSONL storage with retention controls.
+
+### Fixed
+- `list_pages(prefix)` now uses true prefix semantics instead of substring matching.
+- MCP server-reported version is now sourced from `package.json`.
+- `read_context` contract is section-scoped and bounded consistently with runtime behavior.
+
+### Security
+- Added an MIT license file to clarify repository licensing.
+
 ## [0.2.6] - 2026-04-03
 
 ### Added
