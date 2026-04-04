@@ -22,11 +22,12 @@ interface EvalResultRow {
 const TOP3_TARGET = 0.85;
 
 async function main(): Promise<void> {
-  const args = new Set(process.argv.slice(2));
-  const record = args.has("--record");
-  const writeBaseline = args.has("--write-baseline");
-  const ackOverwriteBaseline = args.has("--ack-overwrite-baseline");
-  const recordOutArg = readOption(process.argv.slice(2), "--record-out");
+  const args = process.argv.slice(2);
+  const argSet = new Set(args);
+  const record = argSet.has("--record");
+  const writeBaseline = argSet.has("--write-baseline");
+  const ackOverwriteBaseline = argSet.has("--ack-overwrite-baseline");
+  const recordOutArg = readOption(args, "--record-out");
 
   const queryFile = path.join(process.cwd(), "eval", "queries.json");
   const baselineFile = path.join(process.cwd(), "eval", "baseline.json");

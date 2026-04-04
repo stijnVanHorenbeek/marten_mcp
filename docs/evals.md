@@ -10,6 +10,12 @@ bun run eval
 
 The eval script reports top-1 and top-3 hit rates and uses a top-3 target threshold of `85%`.
 
+`eval/baseline.json` is the primary product benchmark. Keep it focused on real agent-style Marten questions.
+
+Keep externally sourced candidate prompts separate until reviewed:
+
+- `eval/candidates/stackoverflow-v8-candidates.json`
+
 ## Recording baseline expectations
 
 Record mode uses current top results to generate baseline rows.

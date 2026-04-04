@@ -1,0 +1,179 @@
+[
+  {
+    "query": "How do I correctly use MultiStreamProjection when projected documents come back null?",
+    "source": "https://stackoverflow.com/questions/79601415/how-should-i-be-using-the-marten-multistreamprojection",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/projections/multi-stream-projections.md",
+        "/events/projections.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I correlate events for a composite projection in Marten?",
+    "source": "https://github.com/JasperFx/marten/discussions/3861",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/projections/composite.md",
+        "/events/projections/multi-stream-projections.md"
+      ]
+    }
+  },
+  {
+    "query": "How should I configure and troubleshoot async daemon lag and high water mark behavior?",
+    "source": "https://github.com/JasperFx/marten/discussions/4063",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/projections/async-daemon.md",
+        "/events/projections/healthchecks.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I run projection rebuild safely and what does projections -r do?",
+    "source": "https://github.com/JasperFx/marten/discussions/3828",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/projections/rebuilding.md",
+        "/events/projections/async-daemon.md"
+      ]
+    }
+  },
+  {
+    "query": "What are best practices for Marten async daemon with Kubernetes autoscaling?",
+    "source": "https://github.com/JasperFx/marten/discussions/3839",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/projections/async-daemon.md",
+        "/events/projections/healthchecks.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I configure conjoined multi-tenancy for events and projections?",
+    "source": "https://stackoverflow.com/questions/77689200/appending-events-to-marten-from-an-outbox-and-guarantee-ordering",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/multitenancy.md",
+        "/events/projections/efcore.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I append tenant-specific events with EF Core projections?",
+    "source": "https://github.com/JasperFx/marten/discussions/3861",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/projections/efcore.md",
+        "/events/bulk-appending.md"
+      ]
+    }
+  },
+  {
+    "query": "Why can AggregateProjection not support soft-deleted aggregates and what should I do instead?",
+    "source": "https://stackoverflow.com/questions/77660579/aggregateprojection-cannot-support-aggregates-that-are-soft-deleted",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/projections/single-stream-projections.md",
+        "/documents/deletes.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I query soft-deleted documents and include deleted rows when needed?",
+    "source": "https://stackoverflow.com/questions/77660579/aggregateprojection-cannot-support-aggregates-that-are-soft-deleted",
+    "suggestedExpected": {
+      "pathIncludes": "/documents/deletes.md",
+      "headingIncludes": "Soft Deletes"
+    }
+  },
+  {
+    "query": "How do I map custom value objects for indexing with IMemberSource in Marten?",
+    "source": "https://stackoverflow.com/questions/79660693/implementation-of-imembersource-in-marten-for-simple-type",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/documents/indexing.md",
+        "/documents/indexing/metadata-indexes.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I add indexes to mt_events or event store tables with StoreOptions?",
+    "source": "https://github.com/JasperFx/marten/discussions/3741",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/configuration.md",
+        "/events/projections/async-daemon.md"
+      ]
+    }
+  },
+  {
+    "query": "After upgrading to Marten 8, duplicated jsonb field serialization broke. What changed?",
+    "source": "https://github.com/JasperFx/marten/discussions/3999",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/documents/indexing.md",
+        "/documents/storage.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I troubleshoot tables not auto-creating and schema migration behavior in Marten?",
+    "source": "https://stackoverflow.com/questions/78636885/tables-arent-auto-creating-in-pgadmin-4-and-migrations-arent-happening-any-ad",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/schema/migrations.md",
+        "/configuration/hostbuilder.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I configure database creation at startup with AddMarten and AutoCreate?",
+    "source": "https://stackoverflow.com/questions/67095315/how-to-create-database-with-marten-on-application-start",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/configuration/hostbuilder.md",
+        "/schema/migrations.md"
+      ]
+    }
+  },
+  {
+    "query": "How do OpenSession and LightweightSession differ and when should each be used?",
+    "source": "https://stackoverflow.com/questions/67364842/marten-opensession-vs-lightweightsession",
+    "suggestedExpected": {
+      "pathIncludes": "/documents/sessions.md",
+      "headingIncludes": "Opening Sessions"
+    }
+  },
+  {
+    "query": "How do I load related documents and avoid null related entities in Marten queries?",
+    "source": "https://stackoverflow.com/questions/78814927/unable-to-load-related-entities-documents-successfully-in-marten",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/documents/querying/linq/include.md",
+        "/documents/querying/byid.md"
+      ]
+    }
+  },
+  {
+    "query": "What is the recommended integration-testing setup for async projections against PostgreSQL?",
+    "source": "https://stackoverflow.com/questions/74499844/how-can-i-write-an-integration-test-for-marten-on-top-of-postgresql-that-inclu",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/projections/testing.md",
+        "/testing/integration.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I guarantee ordering when appending events from an outbox into Marten?",
+    "source": "https://stackoverflow.com/questions/77689200/appending-events-to-marten-from-an-outbox-and-guarantee-ordering",
+    "suggestedExpected": {
+      "pathAnyOf": [
+        "/events/appending.md",
+        "/events/bulk-appending.md",
+        "/events/optimizing.md"
+      ]
+    }
+  }
+]

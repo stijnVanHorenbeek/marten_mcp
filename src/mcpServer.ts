@@ -12,6 +12,18 @@ const SEARCH_MODES = ["auto", "lexical", "trigram", "exact"] as const;
 const CONTEXT_MODES = ["section"] as const;
 const OUTPUT_FORMATS = ["json", "markdown"] as const;
 const SECTION_FIELDS = ["raw_text", "body_text", "code_text"] as const;
+const DEFAULT_RETRIEVAL_BUDGET = {
+  recommendedMaxToolCalls: 5,
+  recommendedMaxReadChars: 3000
+} as const;
+const MAX_SEARCH_LIMIT = 25;
+const MAX_WITHIN_PAGE_LIMIT = 20;
+const MAX_LIST_PAGES_LIMIT = 100;
+const MAX_CONTEXT_WINDOW = 3;
+const MAX_READ_SECTION_CHARS = 8000;
+const DEFAULT_SEARCH_LIMIT = 5;
+const DEFAULT_WITHIN_PAGE_LIMIT = 4;
+const DEFAULT_READ_MAX_CHARS = 800;
 type OutputFormat = (typeof OUTPUT_FORMATS)[number];
 type SectionField = (typeof SECTION_FIELDS)[number];
 
@@ -33,19 +45,26 @@ export async function startMcpServer(): Promise<void> {
     },
     {
       instructions:
-        "Local MartenDB docs retrieval server. Use search_docs first, then read_section or read_context for focused context."
+        "Local MartenDB docs retrieval server. Prefer: search_docs -> search_within_page/list_headings -> read_section. Keep retrieval lean (target <=5 tool calls and <=3000 chars read) and paginate read_section only when needed."
     }
   );
 
-  server.tool(
+  server.registerTool(
     "search_docs",
     {
-      query: z.string().min(1),
-      limit: z.number().int().min(1).max(25).optional(),
-      offset: z.number().int().min(0).max(2000).optional(),
-      mode: z.enum(SEARCH_MODES).optional(),
-      debug: z.boolean().optional(),
-      format: z.enum(OUTPUT_FORMATS).optional()
+      description: "Search indexed Marten documentation chunks",
+      inputSchema: {
+        query: z.string().min(1),
+        limit: z.number().int().min(1).max(MAX_SEARCH_LIMIT).optional(),
+        offset: z.number().int().min(0).max(2000).optional(),
+        mode: z.enum(SEARCH_MODES).optional(),
+        debug: z.boolean().optional(),
+        format: z.enum(OUTPUT_FORMATS).optional()
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
     },
     async ({
       query,
@@ -65,20 +84,24 @@ export async function startMcpServer(): Promise<void> {
       const debugEnabled = debug ?? false;
       const outputFormat = format ?? "json";
       const safeOffset = offset ?? 0;
-      const results = await service.searchDocs(query, limit ?? 8, (mode ?? "auto") as SearchMode, debugEnabled, safeOffset);
+      const selectedLimit = limit ?? DEFAULT_SEARCH_LIMIT;
+      const results = await service.searchDocs(query, selectedLimit, (mode ?? "auto") as SearchMode, debugEnabled, safeOffset);
+      const guidance = buildSearchGuidance(results);
       const payload = {
         query,
         mode: mode ?? "auto",
         debug: debugEnabled,
         offset: safeOffset,
+        limit: selectedLimit,
         count: results.length,
-        results
+        results,
+        guidance
       };
       telemetry?.record({
         tool: "search_docs",
         queryTerms: tokenizeForTelemetry(query),
         mode: mode ?? "auto",
-        limit: limit ?? 8,
+        limit: selectedLimit,
         offset: safeOffset,
         debug: debugEnabled,
         count: results.length,
@@ -95,14 +118,21 @@ export async function startMcpServer(): Promise<void> {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "read_section",
     {
-      id: z.string().min(1),
-      field: z.enum(SECTION_FIELDS).optional(),
-      offset: z.number().int().min(0).max(2_000_000).optional(),
-      maxChars: z.number().int().min(200).max(8_000).optional(),
-      format: z.enum(OUTPUT_FORMATS).optional()
+      description: "Read one chunk with paginated window",
+      inputSchema: {
+        id: z.string().min(1),
+        field: z.enum(SECTION_FIELDS).optional(),
+        offset: z.number().int().min(0).max(2_000_000).optional(),
+        maxChars: z.number().int().min(200).max(MAX_READ_SECTION_CHARS).optional(),
+        format: z.enum(OUTPUT_FORMATS).optional()
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
     },
     async ({
       id,
@@ -120,19 +150,24 @@ export async function startMcpServer(): Promise<void> {
       const outputFormat = format ?? "json";
       const selectedField = field ?? "raw_text";
       const selectedOffset = offset ?? 0;
-      const selectedMaxChars = maxChars ?? 1500;
+      const selectedMaxChars = maxChars ?? DEFAULT_READ_MAX_CHARS;
       const chunk = await service.readSection(id);
+      const window = chunk ? paginateTextWindow(chunk[selectedField], selectedOffset, selectedMaxChars) : null;
       const payload =
         (chunk
           ? {
               ...toChunkRef(chunk),
               field: selectedField,
-              window: paginateTextWindow(chunk[selectedField], selectedOffset, selectedMaxChars)
+              window,
+              guidance: {
+                budget: DEFAULT_RETRIEVAL_BUDGET,
+                suggestedMaxCharsPerRead: DEFAULT_READ_MAX_CHARS
+              }
             }
           : null) ?? {
-           error: "not_found",
-           id
-         };
+            error: "not_found",
+            id
+          };
       telemetry?.record({
         tool: "read_section",
         id,
@@ -161,14 +196,21 @@ export async function startMcpServer(): Promise<void> {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "read_context",
     {
-      id: z.string().min(1),
-      before: z.number().int().min(0).max(3).optional(),
-      after: z.number().int().min(0).max(3).optional(),
-      contextMode: z.enum(CONTEXT_MODES).optional(),
-      format: z.enum(OUTPUT_FORMATS).optional()
+      description: "Read nearby section chunk references",
+      inputSchema: {
+        id: z.string().min(1),
+        before: z.number().int().min(0).max(MAX_CONTEXT_WINDOW).optional(),
+        after: z.number().int().min(0).max(MAX_CONTEXT_WINDOW).optional(),
+        contextMode: z.enum(CONTEXT_MODES).optional(),
+        format: z.enum(OUTPUT_FORMATS).optional()
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
     },
     async ({
       id,
@@ -185,8 +227,8 @@ export async function startMcpServer(): Promise<void> {
     }) => {
       const mode = contextMode ?? "section";
       const outputFormat = format ?? "json";
-      const safeBefore = clamp(before ?? 1, 0, 3);
-      const safeAfter = clamp(after ?? 1, 0, 3);
+      const safeBefore = clamp(before ?? 1, 0, MAX_CONTEXT_WINDOW);
+      const safeAfter = clamp(after ?? 1, 0, MAX_CONTEXT_WINDOW);
       const context = await service.readContext(id, safeBefore, safeAfter, mode);
       const payload = {
         id,
@@ -216,12 +258,19 @@ export async function startMcpServer(): Promise<void> {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "list_pages",
     {
-      prefix: z.string().optional(),
-      limit: z.number().int().min(1).max(100).optional(),
-      format: z.enum(OUTPUT_FORMATS).optional()
+      description: "List page summaries with prefix filter",
+      inputSchema: {
+        prefix: z.string().optional(),
+        limit: z.number().int().min(1).max(MAX_LIST_PAGES_LIMIT).optional(),
+        format: z.enum(OUTPUT_FORMATS).optional()
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
     },
     async ({ prefix, limit, format }: { prefix?: string; limit?: number; format?: OutputFormat }) => {
       const outputFormat = format ?? "json";
@@ -243,11 +292,18 @@ export async function startMcpServer(): Promise<void> {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "list_headings",
     {
-      path: z.string().min(1),
-      format: z.enum(OUTPUT_FORMATS).optional()
+      description: "List heading groups for one page",
+      inputSchema: {
+        path: z.string().min(1),
+        format: z.enum(OUTPUT_FORMATS).optional()
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
     },
     async ({ path, format }: { path: string; format?: OutputFormat }) => {
       const outputFormat = format ?? "json";
@@ -255,7 +311,12 @@ export async function startMcpServer(): Promise<void> {
       const payload = {
         path,
         count: headings.length,
-        headings
+        headings,
+        guidance: {
+          recommendedNextTool: headings.length > 0 ? "search_within_page" : "search_docs",
+          suggestedWithinPageQuery: "reuse your user question with page-specific keywords",
+          budget: DEFAULT_RETRIEVAL_BUDGET
+        }
       };
       telemetry?.record({
         tool: "list_headings",
@@ -273,16 +334,23 @@ export async function startMcpServer(): Promise<void> {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "search_within_page",
     {
-      path: z.string().min(1),
-      query: z.string().min(1),
-      limit: z.number().int().min(1).max(20).optional(),
-      offset: z.number().int().min(0).max(500).optional(),
-      mode: z.enum(SEARCH_MODES).optional(),
-      debug: z.boolean().optional(),
-      format: z.enum(OUTPUT_FORMATS).optional()
+      description: "Search within a single page path",
+      inputSchema: {
+        path: z.string().min(1),
+        query: z.string().min(1),
+        limit: z.number().int().min(1).max(MAX_WITHIN_PAGE_LIMIT).optional(),
+        offset: z.number().int().min(0).max(500).optional(),
+        mode: z.enum(SEARCH_MODES).optional(),
+        debug: z.boolean().optional(),
+        format: z.enum(OUTPUT_FORMATS).optional()
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
     },
     async ({
       path,
@@ -304,22 +372,32 @@ export async function startMcpServer(): Promise<void> {
       const outputFormat = format ?? "json";
       const debugEnabled = debug ?? false;
       const safeOffset = offset ?? 0;
-      const results = await service.searchWithinPage(path, query, limit ?? 6, mode ?? "auto", debugEnabled, safeOffset);
+      const selectedLimit = limit ?? DEFAULT_WITHIN_PAGE_LIMIT;
+      const results = await service.searchWithinPage(path, query, selectedLimit, mode ?? "auto", debugEnabled, safeOffset);
       const payload = {
         path,
         query,
         mode: mode ?? "auto",
         debug: debugEnabled,
         offset: safeOffset,
+        limit: selectedLimit,
         count: results.length,
-        results
+        results,
+        guidance: {
+          recommendedNextTool: results.length > 0 ? "read_section" : "list_headings",
+          budget: DEFAULT_RETRIEVAL_BUDGET,
+          suggestedReadParams: {
+            field: "raw_text",
+            maxChars: DEFAULT_READ_MAX_CHARS
+          }
+        }
       };
       telemetry?.record({
         tool: "search_within_page",
         path,
         queryTerms: tokenizeForTelemetry(query),
         mode: mode ?? "auto",
-        limit: limit ?? 6,
+        limit: selectedLimit,
         offset: safeOffset,
         debug: debugEnabled,
         count: results.length,
@@ -336,24 +414,44 @@ export async function startMcpServer(): Promise<void> {
     }
   );
 
-  server.tool("get_status", { format: z.enum(OUTPUT_FORMATS).optional() }, async ({ format }: { format?: OutputFormat }) => {
-    const outputFormat = format ?? "json";
-    const status = await service.getStatus();
-    return {
-      content: [
-        {
-          type: "text",
-          text: renderOutput(outputFormat, status, renderStatusMarkdown(status))
-        }
-      ]
-    };
-  });
+  server.registerTool(
+    "get_status",
+    {
+      description: "Get cache and index freshness status",
+      inputSchema: {
+        format: z.enum(OUTPUT_FORMATS).optional()
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async ({ format }: { format?: OutputFormat }) => {
+      const outputFormat = format ?? "json";
+      const status = await service.getStatus();
+      return {
+        content: [
+          {
+            type: "text",
+            text: renderOutput(outputFormat, status, renderStatusMarkdown(status))
+          }
+        ]
+      };
+    }
+  );
 
-  server.tool(
+  server.registerTool(
     "refresh_docs",
     {
-      force: z.boolean().optional(),
-      format: z.enum(OUTPUT_FORMATS).optional()
+      description: "Refresh cached source docs and rebuild index",
+      inputSchema: {
+        force: z.boolean().optional(),
+        format: z.enum(OUTPUT_FORMATS).optional()
+      },
+      annotations: {
+        readOnlyHint: false,
+        idempotentHint: true
+      }
     },
     async ({ force, format }: { force?: boolean; format?: OutputFormat }) => {
       const outputFormat = format ?? "json";
@@ -512,4 +610,50 @@ function tokenizeForTelemetry(query: string): string[] {
     .split(/[^a-z0-9_<>.]+/g)
     .filter((term) => term.length > 1);
   return Array.from(new Set(terms)).slice(0, 12);
+}
+
+function buildSearchGuidance(results: SearchResult[]): {
+  confidence: "high" | "medium" | "low";
+  recommendedNextTool: "list_headings" | "search_within_page" | "read_section" | "search_docs";
+  closeAlternatives: boolean;
+  primaryPath: string | null;
+  suggestedReadParams: {
+    field: "raw_text";
+    maxChars: number;
+  };
+  budget: typeof DEFAULT_RETRIEVAL_BUDGET;
+} {
+  const top = results[0];
+  const second = results[1];
+
+  if (!top) {
+    return {
+      confidence: "low",
+      recommendedNextTool: "search_docs",
+      closeAlternatives: false,
+      primaryPath: null,
+      suggestedReadParams: {
+        field: "raw_text",
+        maxChars: DEFAULT_READ_MAX_CHARS
+      },
+      budget: DEFAULT_RETRIEVAL_BUDGET
+    };
+  }
+
+  const gap = second ? top.score - second.score : top.score;
+  const confidence = gap >= 0.12 ? "high" : gap >= 0.05 ? "medium" : "low";
+  const closeAlternatives = second ? gap < 0.06 : false;
+  const recommendNarrowFirst = confidence !== "high" || closeAlternatives;
+
+  return {
+    confidence,
+    recommendedNextTool: recommendNarrowFirst ? "list_headings" : "read_section",
+    closeAlternatives,
+    primaryPath: top.path,
+    suggestedReadParams: {
+      field: "raw_text",
+      maxChars: DEFAULT_READ_MAX_CHARS
+    },
+    budget: DEFAULT_RETRIEVAL_BUDGET
+  };
 }

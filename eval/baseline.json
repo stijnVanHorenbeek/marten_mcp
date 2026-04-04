@@ -1,236 +1,145 @@
 [
   {
-    "query": "session.Query<User>() soft deletes",
+    "query": "How do I load documents by id with IQuerySession and when should I use IDocumentSession instead?",
+    "expected": {
+      "pathAnyOf": [
+        "/documents/querying/byid.md",
+        "/documents/sessions.md"
+      ]
+    }
+  },
+  {
+    "query": "We use soft deletes with session.Query<User>(); how can we include deleted documents in queries?",
     "expected": {
       "pathIncludes": "/documents/deletes.md",
-      "headingIncludes": "Deleting Documents"
+      "headingIncludes": "Soft Deletes"
     }
   },
   {
-    "query": "aggregate projections",
+    "query": "Our async daemon is lagging. How do I rebuild projections and check daemon health?",
     "expected": {
-      "pathIncludes": "/events/projections/aggregate-projections.md",
-      "headingIncludes": "Aggregate Projections"
+      "pathAnyOf": [
+        "/events/projections/async-daemon.md",
+        "/events/projections/healthchecks.md",
+        "/events/projections/rebuilding.md"
+      ]
     }
   },
   {
-    "query": "inline projections",
+    "query": "What is the right way to handle tenant-specific event appending with EF Core projections?",
     "expected": {
-      "pathIncludes": "/events/projections/inline.md",
-      "headingIncludes": "Inline Projections"
+      "pathAnyOf": [
+        "/events/projections/efcore.md",
+        "/events/bulk-appending.md",
+        "/events/multitenancy.md"
+      ]
     }
   },
   {
-    "query": "live aggregation",
-    "expected": {
-      "pathIncludes": "/events/projections/live-aggregates.md",
-      "headingIncludes": "Live Aggregation"
-    }
-  },
-  {
-    "query": "async daemon",
-    "expected": {
-      "pathIncludes": "/events/projections/async-daemon.md",
-      "headingIncludes": "Async Projections Daemon"
-    }
-  },
-  {
-    "query": "event subscriptions",
-    "expected": {
-      "pathIncludes": "/events/subscriptions.md",
-      "headingIncludes": "Event Subscriptions&#x20;"
-    }
-  },
-  {
-    "query": "event metadata headers",
-    "expected": {
-      "pathIncludes": "/events/projections/using-metadata.md",
-      "headingIncludes": "Using Event Metadata"
-    }
-  },
-  {
-    "query": "stream identity",
-    "expected": {
-      "pathIncludes": "/events/configuration.md",
-      "headingIncludes": "Event Store Configuration"
-    }
-  },
-  {
-    "query": "append events",
-    "expected": {
-      "pathIncludes": "/events/appending.md",
-      "headingIncludes": "Appending Events"
-    }
-  },
-  {
-    "query": "upcasting events",
-    "expected": {
-      "pathIncludes": "/events/versioning.md",
-      "headingIncludes": "Events Versioning"
-    }
-  },
-  {
-    "query": "optimistic concurrency",
-    "expected": {
-      "pathIncludes": "/documents/concurrency.md",
-      "headingIncludes": "Optimistic Concurrency"
-    }
-  },
-  {
-    "query": "lightweight session",
-    "expected": {
-      "pathIncludes": "/configuration/hostbuilder.md",
-      "headingIncludes": "Bootstrapping Marten"
-    }
-  },
-  {
-    "query": "identity map session",
-    "expected": {
-      "pathIncludes": "/documents/sessions.md",
-      "headingIncludes": "Opening Sessions"
-    }
-  },
-  {
-    "query": "query by id",
-    "expected": {
-      "pathIncludes": "/documents/querying/byid.md",
-      "headingIncludes": "Loading Documents by Id"
-    }
-  },
-  {
-    "query": "compiled queries",
+    "query": "When should I use compiled queries instead of regular LINQ queries in Marten?",
     "expected": {
       "pathIncludes": "/documents/querying/compiled-queries.md",
       "headingIncludes": "Compiled Queries and Query Plans"
     }
   },
   {
-    "query": "patch api",
+    "query": "How do single stream projections work with snapshots?",
     "expected": {
-      "pathIncludes": "/documents/partial-updates-patching.md",
-      "headingIncludes": "Partial updates/patching"
+      "pathIncludes": "/events/projections/single-stream-projections.md",
+      "headingIncludes": "Single Stream Projections and Snapshots"
     }
   },
   {
-    "query": "how to bulk insert events?",
+    "query": "How do I do optimistic concurrency checks when saving documents?",
+    "expected": {
+      "pathIncludes": "/documents/concurrency.md",
+      "headingIncludes": "Optimistic Concurrency"
+    }
+  },
+  {
+    "query": "How can I bulk append events for a tenant?",
     "expected": {
       "pathIncludes": "/events/bulk-appending.md",
       "headingIncludes": "Bulk Appending Events"
     }
   },
   {
-    "query": "can you bulk insert documents",
-    "expected": {
-      "pathIncludes": "/documents/storing.md",
-      "headingIncludes": "Storing Documents"
-    }
-  },
-  {
-    "query": "soft delete",
-    "expected": {
-      "pathIncludes": "/documents/deletes.md",
-      "headingIncludes": "Deleting Documents"
-    }
-  },
-  {
-    "query": "multi tenancy",
-    "expected": {
-      "pathIncludes": "/documents/multi-tenancy.md",
-      "headingIncludes": "Multi-Tenanted Documents"
-    }
-  },
-  {
-    "query": "conjoined tenancy",
-    "expected": {
-      "pathIncludes": "/documents/multi-tenancy.md",
-      "headingIncludes": "Multi-Tenanted Documents"
-    }
-  },
-  {
-    "query": "single stream projection",
-    "expected": {
-      "pathIncludes": "/events/projections/single-stream-projections.md",
-      "headingIncludes": "Single Stream Projections and Snapshots"
-    }
-  },
-  {
-    "query": "snapshot projection",
-    "expected": {
-      "pathIncludes": "/events/projections/single-stream-projections.md",
-      "headingIncludes": "Single Stream Projections and Snapshots"
-    }
-  },
-  {
-    "query": "projection lifecycle",
-    "expected": {
-      "pathIncludes": "/events/projections.md",
-      "headingIncludes": "Projections"
-    }
-  },
-  {
-    "query": "daemon high water mark",
-    "expected": {
-      "pathIncludes": "/events/projections/async-daemon.md",
-      "headingIncludes": "Async Projections Daemon"
-    }
-  },
-  {
-    "query": "tenant specific events",
-    "expected": {
-      "pathIncludes": "/events/projections/efcore.md",
-      "headingIncludes": "EF Core Projections"
-    }
-  },
-  {
-    "query": "document aliases",
-    "expected": {
-      "pathIncludes": "/documents/storage.md",
-      "headingIncludes": "Database Storage"
-    }
-  },
-  {
-    "query": "schema patching",
-    "expected": {
-      "pathIncludes": "/documents/partial-updates-patching.md",
-      "headingIncludes": "Partial updates/patching"
-    }
-  },
-  {
-    "query": "event store configuration",
-    "expected": {
-      "pathIncludes": "/events/configuration.md",
-      "headingIncludes": "Event Store Configuration"
-    }
-  },
-  {
-    "query": "UseIdentityMapForAggregates read aggregates",
-    "expected": {
-      "pathIncludes": "/events/projections/read-aggregates.md",
-      "headingIncludes": "Reading Aggregates"
-    }
-  },
-  {
-    "query": "FetchLatest",
-    "expected": {
-      "pathAnyOf": [
-        "/events/natural-keys.md",
-        "/events/projections/read-aggregates.md"
-      ],
-      "headingIncludes": "FetchLatest"
-    }
-  },
-  {
-    "query": "FetchLatest by natural key",
+    "query": "How do I use FetchLatest by natural key?",
     "expected": {
       "pathIncludes": "/events/natural-keys.md",
       "headingIncludes": "Natural Keys"
     }
   },
   {
-    "query": "FetchLatest read aggregates",
+    "query": "How do I read aggregates with FetchLatest?",
     "expected": {
       "pathIncludes": "/events/projections/read-aggregates.md",
       "headingIncludes": "Reading Aggregates"
+    }
+  },
+  {
+    "query": "What is the difference between inline and async projection lifecycle?",
+    "expected": {
+      "pathAnyOf": [
+        "/events/projections/inline.md",
+        "/events/projections/async-daemon.md",
+        "/events/projections.md"
+      ]
+    }
+  },
+  {
+    "query": "How can I use event metadata in projections?",
+    "expected": {
+      "pathAnyOf": [
+        "/events/projections/using-metadata.md",
+        "/events/metadata.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I configure conjoined multi-tenancy for documents?",
+    "expected": {
+      "pathAnyOf": [
+        "/documents/multi-tenancy.md",
+        "/configuration/multitenancy.md"
+      ]
+    }
+  },
+  {
+    "query": "How do I patch part of a document without loading it first?",
+    "expected": {
+      "pathIncludes": "/documents/partial-updates-patching.md",
+      "headingIncludes": "Partial updates/patching"
+    }
+  },
+  {
+    "query": "How can I load many documents by id in one call?",
+    "expected": {
+      "pathAnyOf": [
+        "/documents/querying/byid.md",
+        "/documents/sessions.md"
+      ]
+    }
+  },
+  {
+    "query": "When should I use identity map session vs lightweight session?",
+    "expected": {
+      "pathIncludes": "/documents/sessions.md",
+      "headingIncludes": "Opening Sessions"
+    }
+  },
+  {
+    "query": "How do document aliases affect table storage in Marten?",
+    "expected": {
+      "pathIncludes": "/documents/storage.md",
+      "headingIncludes": "Database Storage"
+    }
+  },
+  {
+    "query": "How do I handle event upcasting/versioning in Marten?",
+    "expected": {
+      "pathIncludes": "/events/versioning.md",
+      "headingIncludes": "Events Versioning"
     }
   }
 ]

@@ -40,6 +40,26 @@ interface QueryProfile {
   shortQuery: boolean;
 }
 
+const QUERY_STOPWORDS = new Set([
+  "in",
+  "review",
+  "please",
+  "and",
+  "for",
+  "the",
+  "this",
+  "with",
+  "how",
+  "what",
+  "when",
+  "why",
+  "where",
+  "should",
+  "would",
+  "could",
+  "into"
+]);
+
 export class HybridIndex {
   private readonly chunks: DocChunk[];
   private readonly byId: Map<string, DocChunk>;
@@ -109,6 +129,8 @@ export class HybridIndex {
 
     const lexicalCandidates = this.collectCandidates(this.lexicalPostings, lexicalTerms);
     const trigramCandidates = this.collectCandidates(this.trigramPostings, trigramTerms);
+    const lexicalTermHitCount = lexicalTerms.reduce((count, term) => count + (this.lexicalPostings.has(term) ? 1 : 0), 0);
+    const lexicalTermCoverage = lexicalTerms.length > 0 ? lexicalTermHitCount / lexicalTerms.length : 1;
     const candidateIds = new Set<string>();
 
     if (useHybridAuto) {
@@ -189,7 +211,16 @@ export class HybridIndex {
     const lexicalEvidenceAbsent = lexicalCandidates.size === 0;
     const lexicalEvidenceWeak = lexicalCandidates.size > 0 && maxLexicalEvidence < 0.12;
     const trigramEvidenceStrong = trigramCandidates.size > 0 && maxTrigramEvidence >= 0.45;
-    const preferTrigramAutoBlend = useHybridAuto && trigramEvidenceStrong && (lexicalEvidenceAbsent || lexicalEvidenceWeak);
+    const typoLikeLexicalQuery =
+      queryKind === "lexical" && lexicalTerms.length >= 2 && lexicalTerms.length <= 6 && lexicalTermCoverage < 0.7;
+    const preferTrigramAutoBlend =
+      useHybridAuto && (typoLikeLexicalQuery || (trigramEvidenceStrong && (lexicalEvidenceAbsent || lexicalEvidenceWeak)));
+    const preferLexicalAutoBlend =
+      useHybridAuto &&
+      !preferTrigramAutoBlend &&
+      !symbolHeavy &&
+      lexicalTermCoverage >= 0.7 &&
+      maxLexicalEvidence >= 0.2;
     const scored: ScoredChunk[] = [];
 
     for (const [id, row] of scoredById.entries()) {
@@ -202,20 +233,35 @@ export class HybridIndex {
       } else if (decidedMode === "exact") {
         score = isExactMatchCandidate(row.chunk, trimmedQuery, flexiblePhraseMatch) ? 1 + row.phraseBoost : 0;
       } else {
-        const lexicalWeight = preferTrigramAutoBlend ? 0.2 : queryKind === "lexical" ? 0.65 : 0.45;
-        const trigramWeight = preferTrigramAutoBlend ? 0.8 : queryKind === "lexical" ? 0.35 : 0.55;
+        const lexicalWeight = preferTrigramAutoBlend
+          ? 0.2
+          : preferLexicalAutoBlend
+            ? 0.85
+            : queryKind === "lexical"
+              ? 0.72
+              : 0.45;
+        const trigramWeight = preferTrigramAutoBlend
+          ? 0.8
+          : preferLexicalAutoBlend
+            ? 0.15
+            : queryKind === "lexical"
+              ? 0.28
+              : 0.55;
+        const normalizedLexical = maxLexicalEvidence > 0 ? row.lexicalScore / maxLexicalEvidence : 0;
+        const normalizedTrigram = maxTrigramEvidence > 0 ? row.trigramScore / maxTrigramEvidence : 0;
+        const rankBlend =
+          lexicalWeight * reciprocalRank(lexicalRank.get(id)) + trigramWeight * reciprocalRank(trigramRank.get(id));
         score =
-          lexicalWeight * reciprocalRank(lexicalRank.get(id)) +
-          trigramWeight * reciprocalRank(trigramRank.get(id)) +
-          row.phraseBoost * 0.55 +
+          lexicalWeight * normalizedLexical +
+          trigramWeight * normalizedTrigram +
+          rankBlend * 0.12 +
+          row.phraseBoost * 0.4 +
           row.codeBoost;
       }
 
       score += identifierFieldBoost(row.chunk, identifierTerms);
-      score += requireSessionApiPenaltyOrBoost(row.chunk, identifierTerms);
+      score += identifierEvidenceAdjustment(row.chunk, identifierTerms);
       score += genericDocsPenalty(row.chunk, identifierTerms, lexicalTerms);
-      score += queryIntentPathBoost(row.chunk, lexicalTerms, identifierTerms);
-      score *= genericPathCapMultiplier(row.chunk, lexicalTerms, identifierTerms);
 
       if (score > 0) {
         scored.push({
@@ -517,11 +563,6 @@ export function buildHybridIndexPersistedState(chunks: DocChunk[]): HybridIndexP
 function classifyQuery(query: string): SearchMode {
   const terms = tokenize(query);
   const symbolHeavy = isSymbolHeavyQuery(query);
-  const hasSessionApiHints = /\bIDocumentSession\b|\bIQuerySession\b|\bLoadAsync\b|\bQuery\s*<|\bStore\s*\(/i.test(query);
-  if (hasSessionApiHints && terms.length >= 6) {
-    return "lexical";
-  }
-
   if (terms.length >= 10 && !symbolHeavy) {
     return "lexical";
   }
@@ -644,7 +685,13 @@ function isShortQuery(query: string): boolean {
 
 function isSymbolHeavyQuery(query: string): boolean {
   const symbols = query.replace(/[A-Za-z0-9\s]/g, "");
-  return symbols.length >= 2;
+  const compactLength = query.replace(/\s+/g, "").length;
+  if (compactLength === 0) {
+    return false;
+  }
+
+  const ratio = symbols.length / compactLength;
+  return symbols.length >= 3 && ratio >= 0.08;
 }
 
 function isExactMatchCandidate(chunk: DocChunk, query: string, flexibleMatch: boolean): boolean {
@@ -727,21 +774,7 @@ function buildQueryProfile(query: string): QueryProfile {
 }
 
 function stripQueryNoise(query: string): string {
-  const noise = new Set([
-    "in",
-    "review",
-    "improvements",
-    "improvement",
-    "please",
-    "and",
-    "for",
-    "the",
-    "this",
-    "with",
-    "usage"
-  ]);
-
-  const terms = tokenize(query).filter((term) => !noise.has(term));
+  const terms = tokenize(query).filter((term) => !QUERY_STOPWORDS.has(term));
   return terms.join(" ");
 }
 
@@ -749,10 +782,22 @@ function extractIdentifierTerms(query: string): string[] {
   const patterns = query.match(/[A-Za-z_][A-Za-z0-9_<>()\/.]*/g) ?? [];
   const out = new Set<string>();
   for (const token of patterns) {
-    if (/^[A-Z]/.test(token) || token.includes(".") || token.includes("<") || token.includes("(")) {
-      tokenize(token).forEach((term) => out.add(term));
-      out.add(token.toLowerCase());
+    const technicalLike =
+      token.includes(".") ||
+      token.includes("<") ||
+      token.includes("(") ||
+      token.includes("/") ||
+      /[a-z][A-Z]/.test(token) ||
+      /^I[A-Z]/.test(token) ||
+      /[A-Z].*[A-Z]/.test(token);
+    if (!technicalLike) {
+      continue;
     }
+
+    tokenize(token)
+      .filter((term) => term.length >= 3)
+      .forEach((term) => out.add(term));
+    out.add(token.toLowerCase());
   }
   return Array.from(out);
 }
@@ -792,29 +837,36 @@ function identifierFieldBoost(chunk: DocChunk, identifierTerms: string[]): numbe
   return Math.min(0.5, (matches / identifierTerms.length) * 0.4);
 }
 
-function requireSessionApiPenaltyOrBoost(chunk: DocChunk, identifierTerms: string[]): number {
-  const hasSessionIntent = identifierTerms.some((term) =>
-    ["idocumentsession", "iquerysession", "query", "loadasync"].includes(term)
-  );
-  if (!hasSessionIntent) {
+function identifierEvidenceAdjustment(chunk: DocChunk, identifierTerms: string[]): number {
+  if (identifierTerms.length < 2) {
     return 0;
   }
 
-  const hasSessionHit =
-    includesPhraseCaseInsensitive(chunk.raw_text, "IDocumentSession") ||
-    includesPhraseCaseInsensitive(chunk.raw_text, "IQuerySession") ||
-    includesPhraseCaseInsensitive(chunk.raw_text, "Query<") ||
-    includesPhraseCaseInsensitive(chunk.raw_text, "LoadAsync");
+  const haystack = `${chunk.title} ${chunk.path} ${chunk.headings.join(" ")} ${chunk.code_text} ${chunk.raw_text}`.toLowerCase();
+  let matches = 0;
+  for (const term of identifierTerms) {
+    if (haystack.includes(term)) {
+      matches += 1;
+    }
+  }
 
-  return hasSessionHit ? 0.45 : -0.32;
+  const ratio = matches / identifierTerms.length;
+  if (ratio >= 0.5) {
+    return 0.1;
+  }
+
+  if (ratio === 0) {
+    return -0.08;
+  }
+
+  return 0;
 }
 
 function genericDocsPenalty(chunk: DocChunk, identifierTerms: string[], lexicalTerms: string[]): number {
   const path = chunk.path.toLowerCase();
   const likelyGeneric =
     path.includes("/getting-started") ||
-    path.includes("/migration-guide") ||
-    path.includes("/configuration/hostbuilder");
+    path.includes("/migration-guide");
 
   if (!likelyGeneric) {
     return 0;
@@ -840,60 +892,4 @@ function dedupeByPath(rows: ScoredChunk[]): ScoredChunk[] {
     out.push(row);
   }
   return out;
-}
-
-function queryIntentPathBoost(chunk: DocChunk, lexicalTerms: string[], identifierTerms: string[]): number {
-  const path = chunk.path.toLowerCase();
-  const hasSessionIntent = hasAny(identifierTerms, ["idocumentsession", "iquerysession", "query", "loadasync"]);
-  const hasProjectionIntent = hasAny(lexicalTerms, ["projection", "projections", "inline", "daemon"]);
-  const hasIndexIntent = hasAny(lexicalTerms, ["index", "indexing", "duplicated", "compiled"]);
-  const hasFetchLatestIntent = hasAny(lexicalTerms, ["fetchlatest", "fetch", "latest"]);
-  const hasReadAggregateIntent = hasAny(lexicalTerms, ["read", "aggregate", "aggregates"]);
-  const hasNaturalKeyIntent = hasAny(lexicalTerms, ["natural", "key", "keys"]);
-
-  let boost = 0;
-  if (hasSessionIntent && path.includes("/documents/sessions")) {
-    boost += 0.7;
-  }
-  if (hasSessionIntent && path.includes("/documents/querying")) {
-    boost += 0.25;
-  }
-  if (hasProjectionIntent && path.includes("/events/projections")) {
-    boost += 0.2;
-  }
-  if (hasIndexIntent && path.includes("/documents/indexing")) {
-    boost += 0.2;
-  }
-  if (hasFetchLatestIntent && hasReadAggregateIntent && path.includes("/events/projections/read-aggregates")) {
-    boost += 0.55;
-  }
-  if (hasFetchLatestIntent && hasNaturalKeyIntent && path.includes("/events/natural-keys")) {
-    boost += 0.55;
-  }
-
-  return boost;
-}
-
-function genericPathCapMultiplier(chunk: DocChunk, lexicalTerms: string[], identifierTerms: string[]): number {
-  const path = chunk.path.toLowerCase();
-  const generic =
-    path.includes("/getting-started") ||
-    path.includes("/migration-guide") ||
-    path.includes("/configuration/hostbuilder");
-  if (!generic) {
-    return 1;
-  }
-
-  const hasSessionIntent = hasAny(identifierTerms, ["idocumentsession", "iquerysession", "query", "loadasync"]);
-  const hasOptimizationIntent = hasAny(lexicalTerms, ["improvement", "improvements", "index", "projection", "query"]);
-  if (hasSessionIntent && hasOptimizationIntent) {
-    return 0.62;
-  }
-
-  return 1;
-}
-
-function hasAny(haystack: string[], needles: string[]): boolean {
-  const set = new Set(haystack.map((value) => value.toLowerCase()));
-  return needles.some((needle) => set.has(needle));
 }
