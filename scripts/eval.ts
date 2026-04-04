@@ -24,15 +24,28 @@ const TOP3_TARGET = 0.85;
 async function main(): Promise<void> {
   const args = new Set(process.argv.slice(2));
   const record = args.has("--record");
+  const writeBaseline = args.has("--write-baseline");
+  const ackOverwriteBaseline = args.has("--ack-overwrite-baseline");
+  const recordOutArg = readOption(process.argv.slice(2), "--record-out");
 
   const queryFile = path.join(process.cwd(), "eval", "queries.json");
   const baselineFile = path.join(process.cwd(), "eval", "baseline.json");
+  const candidateBaselineFile = path.join(process.cwd(), "eval", "generated", "baseline-candidate.json");
+  const recordTarget = path.resolve(recordOutArg ?? (writeBaseline ? baselineFile : candidateBaselineFile));
 
   const queries = await readQueries(queryFile);
   const service = new DocsService();
   await service.initialize();
 
   if (record) {
+    if (writeBaseline && !ackOverwriteBaseline) {
+      throw new Error("Refusing to overwrite eval/baseline.json without --ack-overwrite-baseline");
+    }
+
+    if (!writeBaseline && recordTarget === path.resolve(baselineFile)) {
+      throw new Error("Refusing to overwrite eval/baseline.json without --write-baseline");
+    }
+
     const rows: BaselineCase[] = [];
     for (const query of queries) {
       const results = await service.searchDocs(query, 3, "auto");
@@ -50,8 +63,12 @@ async function main(): Promise<void> {
       });
     }
 
-    await fs.writeFile(baselineFile, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
-    process.stdout.write(`Recorded ${rows.length} baseline expectations to eval/baseline.json\n`);
+    await fs.mkdir(path.dirname(recordTarget), { recursive: true });
+    await fs.writeFile(recordTarget, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
+    process.stdout.write(`Recorded ${rows.length} baseline expectations to ${recordTarget}\n`);
+    if (!writeBaseline) {
+      process.stdout.write("Canonical baseline unchanged. Review candidate file before promoting.\n");
+    }
     return;
   }
 
@@ -165,6 +182,20 @@ function describeExpectedPaths(expected: BaselineCase["expected"]): string {
   }
 
   return expected.pathIncludes ?? "<missing expected path>";
+}
+
+function readOption(args: string[], key: string): string | null {
+  const idx = args.indexOf(key);
+  if (idx < 0) {
+    return null;
+  }
+
+  const value = args[idx + 1];
+  if (!value || value.startsWith("--")) {
+    return null;
+  }
+
+  return value;
 }
 
 void main().catch((error) => {

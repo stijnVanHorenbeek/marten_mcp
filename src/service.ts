@@ -6,6 +6,7 @@ import type {
   CacheMetadata,
   ContextMode,
   DocChunk,
+  HeadingSummary,
   PageSummary,
   ParseDiagnostics,
   SearchMode,
@@ -64,21 +65,33 @@ export class DocsService {
 
   public async readContext(id: string, before = 1, after = 1, mode: ContextMode = "section"): Promise<DocChunk[]> {
     await this.ensureIndex(false);
-    const safeBefore = clamp(before, 0, 10);
-    const safeAfter = clamp(after, 0, 10);
+    const safeBefore = clamp(before, 0, 3);
+    const safeAfter = clamp(after, 0, 3);
     return this.index?.getContext(id, safeBefore, safeAfter, mode) ?? [];
   }
 
-  public async readPage(path: string, maxChunks = 12): Promise<DocChunk[]> {
+  public async listHeadings(path: string): Promise<HeadingSummary[]> {
     await this.ensureIndex(false);
-    const safeMax = clamp(maxChunks, 1, 30);
-    const chunks = this.index?.getPage(path) ?? [];
-    return chunks.slice(0, safeMax);
+    return this.index?.listHeadings(path) ?? [];
   }
 
-  public async listPages(prefix = "", limit = 50): Promise<PageSummary[]> {
+  public async searchWithinPage(
+    path: string,
+    query: string,
+    limit = 6,
+    mode: SearchMode = "auto",
+    debug = false,
+    offset = 0
+  ): Promise<SearchResult[]> {
     await this.ensureIndex(false);
-    const safeLimit = clamp(limit, 1, 200);
+    const safeLimit = clamp(limit, 1, 20);
+    const safeOffset = clamp(offset, 0, 500);
+    return this.index ? this.index.searchWithinPage(path, query, safeLimit, mode, debug, safeOffset) : [];
+  }
+
+  public async listPages(prefix = "", limit = 25): Promise<PageSummary[]> {
+    await this.ensureIndex(false);
+    const safeLimit = clamp(limit, 1, 100);
     return this.index?.listPages(prefix, safeLimit) ?? [];
   }
 

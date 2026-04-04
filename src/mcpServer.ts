@@ -4,15 +4,16 @@ import { z } from "zod";
 import { logInfo } from "./logger.js";
 import { DocsService } from "./service.js";
 import { createTelemetrySinkFromEnv } from "./telemetry.js";
+import { clamp, paginateTextWindow } from "./util.js";
+import packageJson from "../package.json" with { type: "json" };
 import type { ContextMode, DocChunk, PageSummary, SearchMode, SearchResult, StatusReport } from "./types.js";
 
 const SEARCH_MODES = ["auto", "lexical", "trigram", "exact"] as const;
-const CONTEXT_MODES = ["section", "page"] as const;
+const CONTEXT_MODES = ["section"] as const;
 const OUTPUT_FORMATS = ["json", "markdown"] as const;
+const SECTION_FIELDS = ["raw_text", "body_text", "code_text"] as const;
 type OutputFormat = (typeof OUTPUT_FORMATS)[number];
-const MAX_RAW_TEXT_CHARS = 1200;
-const MAX_BODY_TEXT_CHARS = 700;
-const MAX_CODE_TEXT_CHARS = 700;
+type SectionField = (typeof SECTION_FIELDS)[number];
 
 export async function startMcpServer(): Promise<void> {
   const service = new DocsService();
@@ -28,7 +29,7 @@ export async function startMcpServer(): Promise<void> {
   const server = new McpServer(
     {
       name: "marten-docs-mcp",
-      version: "0.1.0"
+      version: packageJson.version
     },
     {
       instructions:
@@ -75,17 +76,13 @@ export async function startMcpServer(): Promise<void> {
       };
       telemetry?.record({
         tool: "search_docs",
-        query,
+        queryTerms: tokenizeForTelemetry(query),
         mode: mode ?? "auto",
         limit: limit ?? 8,
         offset: safeOffset,
         debug: debugEnabled,
         count: results.length,
-        topResults: results.slice(0, 5).map((row) => ({
-          id: row.id,
-          path: row.path,
-          score: row.score
-        }))
+        topResultPaths: results.slice(0, 5).map((row) => row.path)
       });
       return {
         content: [
@@ -102,19 +99,44 @@ export async function startMcpServer(): Promise<void> {
     "read_section",
     {
       id: z.string().min(1),
+      field: z.enum(SECTION_FIELDS).optional(),
+      offset: z.number().int().min(0).max(2_000_000).optional(),
+      maxChars: z.number().int().min(200).max(8_000).optional(),
       format: z.enum(OUTPUT_FORMATS).optional()
     },
-    async ({ id, format }: { id: string; format?: OutputFormat }) => {
+    async ({
+      id,
+      field,
+      offset,
+      maxChars,
+      format
+    }: {
+      id: string;
+      field?: SectionField;
+      offset?: number;
+      maxChars?: number;
+      format?: OutputFormat;
+    }) => {
       const outputFormat = format ?? "json";
+      const selectedField = field ?? "raw_text";
+      const selectedOffset = offset ?? 0;
+      const selectedMaxChars = maxChars ?? 1500;
       const chunk = await service.readSection(id);
       const payload =
-        (chunk ? toBoundedChunk(chunk) : null) ?? {
-          error: "not_found",
-          id
-        };
+        (chunk
+          ? {
+              ...toChunkRef(chunk),
+              field: selectedField,
+              window: paginateTextWindow(chunk[selectedField], selectedOffset, selectedMaxChars)
+            }
+          : null) ?? {
+           error: "not_found",
+           id
+         };
       telemetry?.record({
         tool: "read_section",
         id,
+        field: selectedField,
         found: chunk !== null,
         path: chunk?.path ?? null
       });
@@ -122,7 +144,17 @@ export async function startMcpServer(): Promise<void> {
         content: [
           {
             type: "text",
-            text: renderOutput(outputFormat, payload, chunk ? renderChunkMarkdown(chunk) : `Not found: \`${id}\``)
+            text: renderOutput(
+              outputFormat,
+              payload,
+              chunk
+                ? renderChunkMarkdown(chunk, {
+                    field: selectedField,
+                    offset: selectedOffset,
+                    maxChars: selectedMaxChars
+                  })
+                : `Not found: \`${id}\``
+            )
           }
         ]
       };
@@ -133,8 +165,8 @@ export async function startMcpServer(): Promise<void> {
     "read_context",
     {
       id: z.string().min(1),
-      before: z.number().int().min(0).max(10).optional(),
-      after: z.number().int().min(0).max(10).optional(),
+      before: z.number().int().min(0).max(3).optional(),
+      after: z.number().int().min(0).max(3).optional(),
       contextMode: z.enum(CONTEXT_MODES).optional(),
       format: z.enum(OUTPUT_FORMATS).optional()
     },
@@ -153,23 +185,24 @@ export async function startMcpServer(): Promise<void> {
     }) => {
       const mode = contextMode ?? "section";
       const outputFormat = format ?? "json";
-      const context = await service.readContext(id, before ?? 1, after ?? 1, mode);
+      const safeBefore = clamp(before ?? 1, 0, 3);
+      const safeAfter = clamp(after ?? 1, 0, 3);
+      const context = await service.readContext(id, safeBefore, safeAfter, mode);
       const payload = {
         id,
-        before: before ?? 1,
-        after: after ?? 1,
+        before: safeBefore,
+        after: safeAfter,
         contextMode: mode,
         count: context.length,
-        chunks: context.map(toBoundedChunk)
+        chunks: context.map(toChunkRef)
       };
       telemetry?.record({
         tool: "read_context",
         id,
-        before: before ?? 1,
-        after: after ?? 1,
+        before: safeBefore,
+        after: safeAfter,
         contextMode: mode,
         count: context.length,
-        chunkIds: context.map((chunk) => chunk.id),
         paths: Array.from(new Set(context.map((chunk) => chunk.path)))
       });
       return {
@@ -187,15 +220,15 @@ export async function startMcpServer(): Promise<void> {
     "list_pages",
     {
       prefix: z.string().optional(),
-      limit: z.number().int().min(1).max(200).optional(),
+      limit: z.number().int().min(1).max(100).optional(),
       format: z.enum(OUTPUT_FORMATS).optional()
     },
     async ({ prefix, limit, format }: { prefix?: string; limit?: number; format?: OutputFormat }) => {
       const outputFormat = format ?? "json";
-      const pages = await service.listPages(prefix ?? "", limit ?? 50);
+      const pages = await service.listPages(prefix ?? "", limit ?? 25);
       const payload = {
         prefix: prefix ?? "",
-        limit: limit ?? 50,
+        limit: limit ?? 25,
         count: pages.length,
         pages
       };
@@ -211,32 +244,92 @@ export async function startMcpServer(): Promise<void> {
   );
 
   server.tool(
-    "read_page",
+    "list_headings",
     {
       path: z.string().min(1),
-      maxChunks: z.number().int().min(1).max(30).optional(),
       format: z.enum(OUTPUT_FORMATS).optional()
     },
-    async ({ path, maxChunks, format }: { path: string; maxChunks?: number; format?: OutputFormat }) => {
+    async ({ path, format }: { path: string; format?: OutputFormat }) => {
       const outputFormat = format ?? "json";
-      const chunks = await service.readPage(path, maxChunks ?? 12);
+      const headings = await service.listHeadings(path);
       const payload = {
         path,
-        count: chunks.length,
-        chunks: chunks.map(toBoundedChunk)
+        count: headings.length,
+        headings
       };
       telemetry?.record({
-        tool: "read_page",
+        tool: "list_headings",
         path,
-        maxChunks: maxChunks ?? 12,
-        count: chunks.length,
-        chunkIds: chunks.map((chunk) => chunk.id)
+        count: headings.length
       });
       return {
         content: [
           {
             type: "text",
-            text: renderOutput(outputFormat, payload, renderPageMarkdown(path, chunks))
+            text: renderOutput(outputFormat, payload, renderHeadingsMarkdown(path, headings))
+          }
+        ]
+      };
+    }
+  );
+
+  server.tool(
+    "search_within_page",
+    {
+      path: z.string().min(1),
+      query: z.string().min(1),
+      limit: z.number().int().min(1).max(20).optional(),
+      offset: z.number().int().min(0).max(500).optional(),
+      mode: z.enum(SEARCH_MODES).optional(),
+      debug: z.boolean().optional(),
+      format: z.enum(OUTPUT_FORMATS).optional()
+    },
+    async ({
+      path,
+      query,
+      limit,
+      offset,
+      mode,
+      debug,
+      format
+    }: {
+      path: string;
+      query: string;
+      limit?: number;
+      offset?: number;
+      mode?: SearchMode;
+      debug?: boolean;
+      format?: OutputFormat;
+    }) => {
+      const outputFormat = format ?? "json";
+      const debugEnabled = debug ?? false;
+      const safeOffset = offset ?? 0;
+      const results = await service.searchWithinPage(path, query, limit ?? 6, mode ?? "auto", debugEnabled, safeOffset);
+      const payload = {
+        path,
+        query,
+        mode: mode ?? "auto",
+        debug: debugEnabled,
+        offset: safeOffset,
+        count: results.length,
+        results
+      };
+      telemetry?.record({
+        tool: "search_within_page",
+        path,
+        queryTerms: tokenizeForTelemetry(query),
+        mode: mode ?? "auto",
+        limit: limit ?? 6,
+        offset: safeOffset,
+        debug: debugEnabled,
+        count: results.length,
+        topChunkIds: results.slice(0, 8).map((row) => row.id)
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: renderOutput(outputFormat, payload, renderSearchMarkdown(payload))
           }
         ]
       };
@@ -315,15 +408,24 @@ function renderSearchMarkdown(input: {
   return lines.join("\n");
 }
 
-function renderChunkMarkdown(chunk: DocChunk): string {
-  const bounded = toBoundedChunk(chunk);
+function renderChunkMarkdown(
+  chunk: DocChunk,
+  options: {
+    field: SectionField;
+    offset: number;
+    maxChars: number;
+  }
+): string {
+  const window = paginateTextWindow(chunk[options.field], options.offset, options.maxChars);
   return [
-    `Chunk: \`${bounded.id}\``,
-    `Path: \`${bounded.path}\``,
-    `Title: ${bounded.title}`,
-    `Headings: ${bounded.headings.join(" > ") || "(none)"}`,
+    `Chunk: \`${chunk.id}\``,
+    `Path: \`${chunk.path}\``,
+    `Title: ${chunk.title}`,
+    `Headings: ${chunk.headings.join(" > ") || "(none)"}`,
+    `Field: \`${options.field}\``,
+    `Window: offset=${window.offset}, length=${window.length}, hasMore=${window.hasMore}`,
     "",
-    bounded.raw_text
+    window.value
   ].join("\n");
 }
 
@@ -333,15 +435,14 @@ function renderContextMarkdown(input: {
   after: number;
   contextMode: ContextMode;
   count: number;
-  chunks: DocChunk[];
+  chunks: Array<Pick<DocChunk, "id" | "path" | "headings">>;
 }): string {
   const lines = [
     `Context for \`${input.id}\``,
     `Mode: \`${input.contextMode}\`, before=${input.before}, after=${input.after}, count=${input.count}`
   ];
   for (const chunk of input.chunks) {
-    const bounded = toBoundedChunk(chunk);
-    lines.push(`- \`${bounded.id}\` \`${bounded.path}\` ${bounded.headings.join(" > ")}`);
+    lines.push(`- \`${chunk.id}\` \`${chunk.path}\` ${chunk.headings.join(" > ")}`);
   }
   return lines.join("\n");
 }
@@ -354,11 +455,13 @@ function renderPagesMarkdown(pages: PageSummary[]): string {
   return lines.join("\n");
 }
 
-function renderPageMarkdown(path: string, chunks: DocChunk[]): string {
-  const lines = [`Page: \`${path}\``, `Chunks: ${chunks.length}`];
-  for (const chunk of chunks) {
-    const bounded = toBoundedChunk(chunk);
-    lines.push(`- \`${bounded.id}\` ${bounded.headings.join(" > ") || "(none)"}`);
+function renderHeadingsMarkdown(
+  path: string,
+  headings: Array<{ headingKey: string; firstChunkId: string; chunkCount: number }>
+): string {
+  const lines = [`Page: \`${path}\``, `Headings: ${headings.length}`];
+  for (const heading of headings) {
+    lines.push(`- \`${heading.firstChunkId}\` (${heading.chunkCount} chunks) ${heading.headingKey || "(none)"}`);
   }
   return lines.join("\n");
 }
@@ -393,37 +496,20 @@ function renderRefreshMarkdown(input: {
   ].join("\n");
 }
 
-function toBoundedChunk(chunk: DocChunk): DocChunk & {
-  truncation: {
-    rawTextTruncated: boolean;
-    bodyTextTruncated: boolean;
-    codeTextTruncated: boolean;
-  };
-} {
-  const raw = truncate(chunk.raw_text, MAX_RAW_TEXT_CHARS);
-  const body = truncate(chunk.body_text, MAX_BODY_TEXT_CHARS);
-  const code = truncate(chunk.code_text, MAX_CODE_TEXT_CHARS);
-
+function toChunkRef(chunk: DocChunk): Pick<DocChunk, "id" | "path" | "title" | "headings" | "pageOrder"> {
   return {
-    ...chunk,
-    raw_text: raw.value,
-    body_text: body.value,
-    code_text: code.value,
-    truncation: {
-      rawTextTruncated: raw.truncated,
-      bodyTextTruncated: body.truncated,
-      codeTextTruncated: code.truncated
-    }
+    id: chunk.id,
+    path: chunk.path,
+    title: chunk.title,
+    headings: chunk.headings,
+    pageOrder: chunk.pageOrder
   };
 }
 
-function truncate(value: string, maxChars: number): { value: string; truncated: boolean } {
-  if (value.length <= maxChars) {
-    return { value, truncated: false };
-  }
-
-  return {
-    value: `${value.slice(0, maxChars)}...`,
-    truncated: true
-  };
+function tokenizeForTelemetry(query: string): string[] {
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9_<>.]+/g)
+    .filter((term) => term.length > 1);
+  return Array.from(new Set(terms)).slice(0, 12);
 }

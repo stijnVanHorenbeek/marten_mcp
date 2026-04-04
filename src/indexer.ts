@@ -1,6 +1,7 @@
 import type {
   ContextMode,
   DocChunk,
+  HeadingSummary,
   HybridIndexPersistedState,
   PageSummary,
   SearchMode,
@@ -69,6 +70,29 @@ export class HybridIndex {
   }
 
   public search(query: string, limit: number, mode: SearchMode = "auto", debug = false, offset = 0): SearchResult[] {
+    return this.searchInternal(query, limit, mode, debug, offset, null, true);
+  }
+
+  public searchWithinPage(
+    path: string,
+    query: string,
+    limit: number,
+    mode: SearchMode = "auto",
+    debug = false,
+    offset = 0
+  ): SearchResult[] {
+    return this.searchInternal(query, limit, mode, debug, offset, path, false);
+  }
+
+  private searchInternal(
+    query: string,
+    limit: number,
+    mode: SearchMode,
+    debug: boolean,
+    offset: number,
+    pathScope: string | null,
+    dedupePaths: boolean
+  ): SearchResult[] {
     const profile = buildQueryProfile(query);
     const trimmedQuery = profile.raw;
     const shortQuery = profile.shortQuery;
@@ -76,10 +100,12 @@ export class HybridIndex {
     const flexiblePhraseMatch = symbolHeavy || shortQuery;
     const queryKind = profile.queryClass;
     const useHybridAuto = mode === "auto" && !shortQuery;
-    const decidedMode = mode === "auto" ? (shortQuery ? "exact" : queryKind) : mode;
+    const decidedMode = mode === "auto" ? (shortQuery ? "exact" : "auto") : mode;
     const lexicalTerms = profile.lexicalTerms;
     const trigramTerms = profile.trigramTerms;
     const identifierTerms = profile.identifierTerms;
+    const normalizedPathScope = pathScope ? pathScope.trim() : "";
+    const hasPathScope = normalizedPathScope.length > 0;
 
     const lexicalCandidates = this.collectCandidates(this.lexicalPostings, lexicalTerms);
     const trigramCandidates = this.collectCandidates(this.trigramPostings, trigramTerms);
@@ -139,6 +165,10 @@ export class HybridIndex {
           ? Math.min(0.35, SEARCH_FIELD_WEIGHTS.code * 0.6)
           : 0;
 
+      if (hasPathScope && indexed.chunk.path !== normalizedPathScope) {
+        continue;
+      }
+
       scoredById.set(id, {
         chunk: indexed.chunk,
         lexicalScore,
@@ -150,6 +180,16 @@ export class HybridIndex {
 
     const lexicalRank = rankByScore(scoredById, (row) => row.lexicalScore + row.phraseBoost * 0.35 + row.codeBoost * 0.15);
     const trigramRank = rankByScore(scoredById, (row) => row.trigramScore + row.phraseBoost * 0.2 + row.codeBoost * 0.3);
+    let maxLexicalEvidence = 0;
+    let maxTrigramEvidence = 0;
+    for (const row of scoredById.values()) {
+      maxLexicalEvidence = Math.max(maxLexicalEvidence, row.lexicalScore);
+      maxTrigramEvidence = Math.max(maxTrigramEvidence, row.trigramScore);
+    }
+    const lexicalEvidenceAbsent = lexicalCandidates.size === 0;
+    const lexicalEvidenceWeak = lexicalCandidates.size > 0 && maxLexicalEvidence < 0.12;
+    const trigramEvidenceStrong = trigramCandidates.size > 0 && maxTrigramEvidence >= 0.45;
+    const preferTrigramAutoBlend = useHybridAuto && trigramEvidenceStrong && (lexicalEvidenceAbsent || lexicalEvidenceWeak);
     const scored: ScoredChunk[] = [];
 
     for (const [id, row] of scoredById.entries()) {
@@ -162,8 +202,8 @@ export class HybridIndex {
       } else if (decidedMode === "exact") {
         score = isExactMatchCandidate(row.chunk, trimmedQuery, flexiblePhraseMatch) ? 1 + row.phraseBoost : 0;
       } else {
-        const lexicalWeight = queryKind === "lexical" ? 0.7 : 0.35;
-        const trigramWeight = queryKind === "lexical" ? 0.3 : 0.65;
+        const lexicalWeight = preferTrigramAutoBlend ? 0.2 : queryKind === "lexical" ? 0.65 : 0.45;
+        const trigramWeight = preferTrigramAutoBlend ? 0.8 : queryKind === "lexical" ? 0.35 : 0.55;
         score =
           lexicalWeight * reciprocalRank(lexicalRank.get(id)) +
           trigramWeight * reciprocalRank(trigramRank.get(id)) +
@@ -200,8 +240,9 @@ export class HybridIndex {
 
       return a.chunk.id.localeCompare(b.chunk.id);
     });
-    const deduped = dedupeByPath(scored);
-    return deduped.slice(offset, offset + limit).map((row) => ({
+    const scoped = hasPathScope ? scored.filter((row) => row.chunk.path === normalizedPathScope) : scored;
+    const rankedRows = dedupePaths ? dedupeByPath(scoped) : scoped;
+    return rankedRows.slice(offset, offset + limit).map((row) => ({
       id: row.chunk.id,
       path: row.chunk.path,
       title: row.chunk.title,
@@ -214,6 +255,7 @@ export class HybridIndex {
         ? {
             decidedMode,
             queryClass: queryKind,
+            autoBlend: useHybridAuto,
             phraseBoost: round(
               exactPhraseBoost(row.chunk, trimmedQuery, queryKind === "trigram", SEARCH_FIELD_WEIGHTS, flexiblePhraseMatch)
             ),
@@ -231,7 +273,7 @@ export class HybridIndex {
     return this.byId.get(id);
   }
 
-  public getContext(id: string, before: number, after: number, mode: ContextMode = "section"): DocChunk[] {
+  public getContext(id: string, before: number, after: number, _mode: ContextMode = "section"): DocChunk[] {
     const target = this.byId.get(id);
     if (!target) {
       return [];
@@ -240,7 +282,7 @@ export class HybridIndex {
     const pageChunks = this.chunksByPath.get(target.path) ?? [];
     const targetHeadingKey = target.headings.join(" > ");
     const sectionChunks = pageChunks.filter((chunk) => chunk.headings.join(" > ") === targetHeadingKey);
-    const scope = mode === "page" ? pageChunks : sectionChunks.length > 0 ? sectionChunks : pageChunks;
+    const scope = sectionChunks.length > 0 ? sectionChunks : pageChunks;
 
     const idx = scope.findIndex((c) => c.id === id);
     if (idx < 0) {
@@ -256,12 +298,35 @@ export class HybridIndex {
     return this.chunksByPath.get(path) ?? [];
   }
 
+  public listHeadings(path: string): HeadingSummary[] {
+    const page = this.getPage(path);
+    const byHeading = new Map<string, HeadingSummary>();
+
+    for (const chunk of page) {
+      const headingKey = chunk.headings.join(" > ");
+      const existing = byHeading.get(headingKey);
+      if (existing) {
+        existing.chunkCount += 1;
+        continue;
+      }
+
+      byHeading.set(headingKey, {
+        headingKey,
+        headings: [...chunk.headings],
+        firstChunkId: chunk.id,
+        chunkCount: 1
+      });
+    }
+
+    return Array.from(byHeading.values());
+  }
+
   public listPages(prefix: string, limit: number): PageSummary[] {
     const normalizedPrefix = prefix.trim().toLowerCase();
     const pages: PageSummary[] = [];
 
     for (const [path, chunks] of this.chunksByPath.entries()) {
-      if (normalizedPrefix && !path.toLowerCase().includes(normalizedPrefix)) {
+      if (normalizedPrefix && !path.toLowerCase().startsWith(normalizedPrefix)) {
         continue;
       }
 

@@ -24,8 +24,8 @@ type TelemetryEvent =
       processId: number;
       seq: number;
       ts: string;
-      query: string;
-      topResults: Array<{ id: string; path: string; score: number }>;
+      queryTerms: string[];
+      topResultPaths: string[];
     }
   | {
       tool: "read_section";
@@ -42,7 +42,16 @@ type TelemetryEvent =
       paths: string[];
     }
   | {
-      tool: "read_page";
+      tool: "search_within_page";
+      processId: number;
+      seq: number;
+      ts: string;
+      path: string;
+      queryTerms: string[];
+      topChunkIds: string[];
+    }
+  | {
+      tool: "list_headings";
       processId: number;
       seq: number;
       ts: string;
@@ -122,12 +131,13 @@ export async function mineTelemetry(options: CliOptions): Promise<MineRunResult>
   for (const envelope of events) {
     const event = envelope.event;
     if (event.tool === "search_docs") {
-      const queryTerms = canonicalTerms(event.query);
-      const clusterId = findOrCreateClusterId(event.query, queryTerms, clusters, options);
-      const stats = getOrCreateStats(statsByCluster, clusterId, event.query);
+      const queryTerms = canonicalTerms(event.queryTerms.join(" "));
+      const representativeQuery = event.queryTerms.join(" ").trim();
+      const clusterId = findOrCreateClusterId(representativeQuery, queryTerms, clusters, options);
+      const stats = getOrCreateStats(statsByCluster, clusterId, representativeQuery);
       stats.searches += 1;
-      stats.queryCounts.set(event.query, (stats.queryCounts.get(event.query) ?? 0) + 1);
-      const top1 = event.topResults[0]?.path;
+      stats.queryCounts.set(representativeQuery, (stats.queryCounts.get(representativeQuery) ?? 0) + 1);
+      const top1 = event.topResultPaths[0];
       if (top1) {
         stats.top1PathCounts.set(top1, (stats.top1PathCounts.get(top1) ?? 0) + 1);
       }
@@ -138,7 +148,7 @@ export async function mineTelemetry(options: CliOptions): Promise<MineRunResult>
         tsMs: tsMs(event.ts),
         seq: event.seq,
         clusterId,
-        topResultPaths: new Set(event.topResults.map((row) => row.path))
+        topResultPaths: new Set(event.topResultPaths)
       });
       if (list.length > 40) {
         list.shift();
@@ -316,7 +326,7 @@ function selectedPathsFromReadEvent(event: TelemetryEvent): string[] {
   if (event.tool === "read_context") {
     return event.paths ?? [];
   }
-  if (event.tool === "read_page") {
+  if (event.tool === "search_within_page") {
     return event.path ? [event.path] : [];
   }
   return [];

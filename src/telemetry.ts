@@ -15,21 +15,18 @@ interface TelemetryBase {
 type TelemetryEventInput =
   | {
       tool: "search_docs";
-      query: string;
+      queryTerms: string[];
       mode: string;
       limit: number;
       offset: number;
       debug: boolean;
       count: number;
-      topResults: Array<{
-        id: string;
-        path: string;
-        score: number;
-      }>;
+      topResultPaths: string[];
     }
   | {
       tool: "read_section";
       id: string;
+      field: "raw_text" | "body_text" | "code_text";
       found: boolean;
       path: string | null;
     }
@@ -40,35 +37,40 @@ type TelemetryEventInput =
       after: number;
       contextMode: string;
       count: number;
-      chunkIds: string[];
       paths: string[];
     }
   | {
-      tool: "read_page";
+      tool: "list_headings";
       path: string;
-      maxChunks: number;
       count: number;
-      chunkIds: string[];
+    }
+  | {
+      tool: "search_within_page";
+      path: string;
+      queryTerms: string[];
+      mode: string;
+      limit: number;
+      offset: number;
+      debug: boolean;
+      count: number;
+      topChunkIds: string[];
     };
 
 interface SearchTelemetryEvent extends TelemetryBase {
   tool: "search_docs";
-  query: string;
+  queryTerms: string[];
   mode: string;
   limit: number;
   offset: number;
   debug: boolean;
   count: number;
-  topResults: Array<{
-    id: string;
-    path: string;
-    score: number;
-  }>;
+  topResultPaths: string[];
 }
 
 interface ReadSectionTelemetryEvent extends TelemetryBase {
   tool: "read_section";
   id: string;
+  field: "raw_text" | "body_text" | "code_text";
   found: boolean;
   path: string | null;
 }
@@ -80,23 +82,33 @@ interface ReadContextTelemetryEvent extends TelemetryBase {
   after: number;
   contextMode: string;
   count: number;
-  chunkIds: string[];
   paths: string[];
 }
 
-interface ReadPageTelemetryEvent extends TelemetryBase {
-  tool: "read_page";
+interface ListHeadingsTelemetryEvent extends TelemetryBase {
+  tool: "list_headings";
   path: string;
-  maxChunks: number;
   count: number;
-  chunkIds: string[];
+}
+
+interface SearchWithinPageTelemetryEvent extends TelemetryBase {
+  tool: "search_within_page";
+  path: string;
+  queryTerms: string[];
+  mode: string;
+  limit: number;
+  offset: number;
+  debug: boolean;
+  count: number;
+  topChunkIds: string[];
 }
 
 type TelemetryEvent =
   | SearchTelemetryEvent
   | ReadSectionTelemetryEvent
   | ReadContextTelemetryEvent
-  | ReadPageTelemetryEvent;
+  | ListHeadingsTelemetryEvent
+  | SearchWithinPageTelemetryEvent;
 
 interface TelemetryRecord {
   schema: "marten-mcp-telemetry";
@@ -105,16 +117,19 @@ interface TelemetryRecord {
 }
 
 export class TelemetrySink {
-  private readonly filePath: string;
-  private readonly dirPath: string;
+  private readonly targetPath: string;
+  private readonly retentionDays: number;
+  private readonly usesDirectoryLayout: boolean;
   private sequence = 0;
   private initialized = false;
+  private pruned = false;
   private queue: Promise<void> = Promise.resolve();
   private writeFailed = false;
 
-  public constructor(filePath: string) {
-    this.filePath = filePath;
-    this.dirPath = path.dirname(filePath);
+  public constructor(targetPath: string, retentionDays = 14) {
+    this.targetPath = targetPath;
+    this.usesDirectoryLayout = !targetPath.toLowerCase().endsWith(".jsonl");
+    this.retentionDays = Math.max(1, retentionDays);
   }
 
   public record(event: TelemetryEventInput): void {
@@ -135,10 +150,16 @@ export class TelemetrySink {
     this.queue = this.queue
       .then(async () => {
         if (!this.initialized) {
-          await fs.mkdir(this.dirPath, { recursive: true });
+          await fs.mkdir(this.usesDirectoryLayout ? this.targetPath : path.dirname(this.targetPath), { recursive: true });
           this.initialized = true;
         }
-        await fs.appendFile(this.filePath, line, "utf8");
+        if (!this.pruned) {
+          await this.pruneOldFiles().catch(() => {
+            // best effort retention management
+          });
+          this.pruned = true;
+        }
+        await fs.appendFile(this.resolveOutputFilePath(fullEvent.ts), line, "utf8");
       })
       .catch((error) => {
         if (this.writeFailed) {
@@ -147,14 +168,14 @@ export class TelemetrySink {
         this.writeFailed = true;
         const message = error instanceof Error ? error.message : String(error);
         logWarn("Telemetry write failed; disabling telemetry writes", {
-          filePath: this.filePath,
+          filePath: this.targetPath,
           error: message
         });
       });
   }
 
   public getFilePath(): string {
-    return this.filePath;
+    return this.targetPath;
   }
 
   public async flush(): Promise<void> {
@@ -165,6 +186,44 @@ export class TelemetrySink {
     this.sequence += 1;
     return this.sequence;
   }
+
+  private resolveOutputFilePath(ts: string): string {
+    if (!this.usesDirectoryLayout) {
+      return this.targetPath;
+    }
+
+    const day = ts.slice(0, 10);
+    return path.join(this.targetPath, `${day}.jsonl`);
+  }
+
+  private async pruneOldFiles(): Promise<void> {
+    if (!this.usesDirectoryLayout) {
+      return;
+    }
+
+    const entries = await fs.readdir(this.targetPath, { withFileTypes: true });
+    const now = Date.now();
+    const maxAgeMs = this.retentionDays * 24 * 60 * 60 * 1000;
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
+        continue;
+      }
+
+      const match = entry.name.match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
+      if (!match) {
+        continue;
+      }
+
+      const ts = Date.parse(`${match[1]}T00:00:00.000Z`);
+      if (!Number.isFinite(ts)) {
+        continue;
+      }
+
+      if (now - ts > maxAgeMs) {
+        await fs.rm(path.join(this.targetPath, entry.name), { force: true });
+      }
+    }
+  }
 }
 
 export function createTelemetrySinkFromEnv(): TelemetrySink | null {
@@ -174,6 +233,20 @@ export function createTelemetrySinkFromEnv(): TelemetrySink | null {
   }
 
   const target = process.env.MARTEN_MCP_TELEMETRY_PATH?.trim();
-  const defaultPath = path.join(resolveCachePaths().dir, "telemetry.jsonl");
-  return new TelemetrySink(path.resolve(target || defaultPath));
+  const retentionDays = parseRetentionDays(process.env.MARTEN_MCP_TELEMETRY_RETENTION_DAYS);
+  const defaultPath = path.join(resolveCachePaths().dir, "telemetry");
+  return new TelemetrySink(path.resolve(target || defaultPath), retentionDays);
+}
+
+function parseRetentionDays(raw: string | undefined): number {
+  if (!raw) {
+    return 14;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return 14;
+  }
+
+  return Math.round(parsed);
 }
