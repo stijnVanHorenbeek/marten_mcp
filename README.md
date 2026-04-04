@@ -26,6 +26,10 @@ curl -fsSL https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/stijnVanHorenbeek/marten_mcp/master/scripts/quickinstall.ps1))) -Client copilot
 ```
 
+## Example SKILL.md
+
+Example [SKILL.md](examples/skills/martendb/SKILL.md) is included
+
 ## MCP config examples
 
 ### OpenCode
