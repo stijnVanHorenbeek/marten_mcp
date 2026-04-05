@@ -42,8 +42,16 @@ export interface DocChunk {
   body_text: string;
   code_text: string;
   raw_text: string;
+  segments?: ChunkSegment[];
   order: number;
   pageOrder: number;
+}
+
+export type ChunkSegmentKind = "heading" | "prose" | "code" | "admonition" | "image";
+
+export interface ChunkSegment {
+  kind: ChunkSegmentKind;
+  text: string;
 }
 
 export interface PageSummary {

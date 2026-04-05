@@ -72,14 +72,12 @@ Example [SKILL.md](examples/skills/martendb/SKILL.md) is included
 
 ## MCP tools
 
-All tools support `format: "json" | "markdown"` (`json` default).
-
-- `search_docs(query, limit?, offset?, mode?, debug?)`
-- `list_pages(prefix?, limit?)`
+- `search_docs(query, limit?, offset?)`
+- `search_within_page(path, query, limit?, offset?)`
 - `list_headings(path)`
-- `search_within_page(path, query, limit?, offset?, mode?, debug?)`
-- `read_context(id, before?, after?)` (section-scoped references)
-- `read_section(id, field?, offset?, maxChars?)` (paginated content windows)
+- `read_section(id, segmentIndex?, offset?, maxChars?)` (returns one local segment plus compact `neighbors.before/after` refs)
+- `read_context(id, before?, after?)` (nearby refs only)
+- `list_pages(prefix?, limit?)` (discovery only when search is insufficient)
 - `get_status()`
 - `refresh_docs(force?)`
 
@@ -87,16 +85,16 @@ All tools support `format: "json" | "markdown"` (`json` default).
 
 1. `search_docs(...)`
 2. Narrow with `list_headings(...)` and/or `search_within_page(...)`
-3. Use `read_context(...)` for nearby references only
-4. Read text with paginated `read_section(...)`
+3. Read one chunk with `read_section(...)`
+4. Use `read_context(...)` only for nearby references
 
 Broad page dumps are intentionally unsupported.
 
 ```text
-1. search_docs(query="aggregate projections", limit=5, mode="auto")
+1. search_docs(query="aggregate projections", limit=3)
 2. search_within_page(path="/events/projections/aggregate-projections.md", query="lifecycle", limit=3)
-3. read_context(id="<id>", before=1, after=1)
-4. read_section(id="<id>", field="raw_text", offset=0, maxChars=1200)
+3. read_section(id="<id>", offset=0, maxChars=1200)
+4. read_context(id="<id>", before=1, after=1)
 5. repeat read_section(..., offset=<nextOffset>) while hasMore=true
 ```
 

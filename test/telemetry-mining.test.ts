@@ -37,7 +37,9 @@ describe("telemetry and eval mining", () => {
     sink.record({
       tool: "read_section",
       id: "chunk-1",
-      field: "raw_text",
+      requestedSegmentIndex: null,
+      resolvedSegmentIndex: 0,
+      segmentKind: "prose",
       found: true,
       path: "/documents/querying/compiled-queries.md"
     });

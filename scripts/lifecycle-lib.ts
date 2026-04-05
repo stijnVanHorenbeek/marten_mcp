@@ -252,11 +252,11 @@ if [ "$RUNTIME" = "node" ]; then
   exec node ${shellEscape(state.bundlePath)} "$@"
 fi
 
-if command -v node >/dev/null 2>&1; then
-  exec node ${shellEscape(state.bundlePath)} "$@"
-fi
 if command -v bun >/dev/null 2>&1; then
   exec bun ${shellEscape(state.bundlePath)} "$@"
+fi
+if command -v node >/dev/null 2>&1; then
+  exec node ${shellEscape(state.bundlePath)} "$@"
 fi
 
 echo "Neither node nor bun is available on PATH." >&2

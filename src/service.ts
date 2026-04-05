@@ -1,6 +1,6 @@
 import { HARD_TTL_MS, INDEX_VERSION, PARSER_VERSION, SOFT_TTL_MS, SOURCE_URL } from "./config.js";
 import { DocsCache, cacheExistsOnDisk, computeFreshness } from "./cache.js";
-import { HybridIndex } from "./indexer.js";
+import { HybridIndex, type QueryProfileInspection, inspectQueryProfile } from "./indexer.js";
 import { logInfo } from "./logger.js";
 import type {
   CacheMetadata,
@@ -58,6 +58,10 @@ export class DocsService {
     return this.index ? this.index.search(query, safeLimit, mode, debug, safeOffset) : [];
   }
 
+  public inspectQueryProfile(query: string): QueryProfileInspection {
+    return inspectQueryProfile(query);
+  }
+
   public async readSection(id: string): Promise<DocChunk | null> {
     await this.ensureIndex(false);
     return this.index?.getById(id) ?? null;
@@ -68,6 +72,13 @@ export class DocsService {
     const safeBefore = clamp(before, 0, 3);
     const safeAfter = clamp(after, 0, 3);
     return this.index?.getContext(id, safeBefore, safeAfter, mode) ?? [];
+  }
+
+  public async getNeighbors(id: string, before = 1, after = 1): Promise<{ before: DocChunk[]; after: DocChunk[] }> {
+    await this.ensureIndex(false);
+    const safeBefore = clamp(before, 0, 3);
+    const safeAfter = clamp(after, 0, 3);
+    return this.index?.getNeighbors(id, safeBefore, safeAfter) ?? { before: [], after: [] };
   }
 
   public async listHeadings(path: string): Promise<HeadingSummary[]> {
@@ -93,6 +104,11 @@ export class DocsService {
     await this.ensureIndex(false);
     const safeLimit = clamp(limit, 1, 100);
     return this.index?.listPages(prefix, safeLimit) ?? [];
+  }
+
+  public async getPage(path: string): Promise<DocChunk[]> {
+    await this.ensureIndex(false);
+    return this.index?.getPage(path) ?? [];
   }
 
   public async getStatus(): Promise<StatusReport> {

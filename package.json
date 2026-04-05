@@ -24,7 +24,11 @@
     "verify:local": "bun run scripts/verify.ts",
     "eval": "bun run scripts/eval.ts",
     "eval:record": "bun run scripts/eval.ts --record",
-    "eval:mine": "bun run scripts/mine-eval-from-telemetry.ts"
+    "eval:mine": "bun run scripts/mine-eval-from-telemetry.ts",
+    "trace:show": "bun run scripts/trace-show.ts",
+    "trace:analyze": "bun run scripts/trace-analyze.ts",
+    "inspect:chunk": "bun run scripts/inspect-chunk.ts",
+    "inspect:query": "bun run scripts/inspect-query.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

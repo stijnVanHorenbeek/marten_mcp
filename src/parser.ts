@@ -1,4 +1,4 @@
-import type { DocChunk, PageDoc, ParseDiagnostics } from "./types.js";
+import type { ChunkSegment, DocChunk, PageDoc, ParseDiagnostics } from "./types.js";
 
 const SOFT_CHUNK_CHARS = 2200;
 const HARD_CHUNK_CHARS = 3200;
@@ -118,6 +118,7 @@ export function chunkPages(pages: PageDoc[]): DocChunk[] {
           body_text: fields.body_text,
           code_text: fields.code_text,
           raw_text: fields.raw_text,
+          segments: fields.segments,
           order,
           pageOrder
         });
@@ -139,6 +140,12 @@ function parseBlocks(lines: string[]): Block[] {
     const line = lines[i];
 
     if (isSnippetAnchor(line)) {
+      blocks.push({ type: "boilerplate", kind: "snippet-anchor", raw: line });
+      i += 1;
+      continue;
+    }
+
+    if (isThematicBreak(line)) {
       blocks.push({ type: "boilerplate", kind: "snippet-anchor", raw: line });
       i += 1;
       continue;
@@ -688,7 +695,7 @@ function splitRawBlock(block: Exclude<Block, { type: "heading" | "paragraph" | "
   return parts.map((part) => ({ ...block, raw: part }));
 }
 
-function buildChunkFields(blocks: Block[]): Pick<DocChunk, "headings" | "body_text" | "code_text" | "raw_text"> {
+function buildChunkFields(blocks: Block[]): Pick<DocChunk, "headings" | "body_text" | "code_text" | "raw_text" | "segments"> {
   const headings = blocks.filter((b): b is Extract<Block, { type: "heading" }> => b.type === "heading").map((b) => b.text);
   const body_text = blocks
     .filter((b): b is Extract<Block, { type: "paragraph" | "admonition" | "image" }> =>
@@ -718,11 +725,35 @@ function buildChunkFields(blocks: Block[]): Pick<DocChunk, "headings" | "body_te
     .join("\n\n")
     .trim();
 
+  const segments: ChunkSegment[] = blocks
+    .filter((b) => b.type !== "boilerplate")
+    .map((b): ChunkSegment | null => {
+      if (b.type === "heading") {
+        return { kind: "heading", text: b.text };
+      }
+      if (b.type === "paragraph") {
+        return { kind: "prose", text: b.text };
+      }
+      if (b.type === "admonition") {
+        return { kind: "admonition", text: b.text };
+      }
+      if (b.type === "code") {
+        return { kind: "code", text: b.code };
+      }
+      if (b.type === "image") {
+        const text = b.alt ? `Image: ${b.alt}` : b.target ? `Image: ${b.target}` : "Image";
+        return { kind: "image", text };
+      }
+      return null;
+    })
+    .filter((segment): segment is ChunkSegment => segment !== null && segment.text.trim().length > 0);
+
   return {
     headings,
     body_text,
     code_text,
-    raw_text
+    raw_text,
+    segments
   };
 }
 
@@ -779,6 +810,10 @@ function splitSentences(input: string): string[] {
 
 function isSnippetAnchor(line: string): boolean {
   return /^\s*snippet source \| anchor\s*$/.test(line);
+}
+
+function isThematicBreak(line: string): boolean {
+  return /^\s*---+\s*$/.test(line);
 }
 
 function isAdmonitionOpen(line: string): RegExpMatchArray | null {

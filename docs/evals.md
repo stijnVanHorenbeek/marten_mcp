@@ -63,4 +63,27 @@ Useful tuning flags:
 - `--cluster-similarity`
 - `--cluster-min-shared-terms`
 
+
+## Trace tooling
+
+Use telemetry traces to inspect model/tool behavior for one run:
+
+```bash
+bun run trace:show -- --latest
+bun run trace:analyze -- --latest
+bun run trace:show -- --input ~/.cache/marten-docs-mcp/telemetry/2026-04-05.jsonl --process-id 85532
+bun run trace:analyze -- --input ~/.cache/marten-docs-mcp/telemetry/2026-04-05.jsonl --process-id 85532
+```
+
+Runtime telemetry files are stored under `~/.cache/marten-docs-mcp/telemetry` by default (or `MARTEN_MCP_TELEMETRY_PATH` when set).
+`--latest` selects the newest `*.jsonl` file from the resolved telemetry location.
+
+## Retrieval inspectors
+
+Use local inspection scripts to debug chunk structure and query ranking:
+
+```bash
+bun run inspect:chunk -- --id /documents/querying/byid.md::1 --context 1
+bun run inspect:query -- --query "LoadManyAsync" --show-profile
+```
 Mined output is a candidate source for manual review before updating `eval/baseline.json`.

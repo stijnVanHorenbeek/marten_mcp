@@ -92,10 +92,10 @@ if "%RUNTIME%"=="" set "RUNTIME=$Runtime"
 if /I "%RUNTIME%"=="bun" goto run_bun
 if /I "%RUNTIME%"=="node" goto run_node
 
-where node >nul 2>nul
-if %ERRORLEVEL%==0 goto run_node
 where bun >nul 2>nul
 if %ERRORLEVEL%==0 goto run_bun
+where node >nul 2>nul
+if %ERRORLEVEL%==0 goto run_node
 
 echo Neither node nor bun is available on PATH.>&2
 exit /b 1

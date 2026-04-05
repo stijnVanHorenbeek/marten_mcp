@@ -43,6 +43,29 @@ MARTEN_MCP_SQLITE_PATH=~/.cache/marten-docs-mcp/cache.db
 MARTEN_MCP_SQLITE_DRIVER=auto    # auto | bun-sqlite | node-sqlite
 ```
 
+## MCP runtime limits
+
+These limits are used by MCP retrieval tools to clamp read/search arguments.
+
+```bash
+MARTEN_MCP_MAX_SEARCH_LIMIT=5
+MARTEN_MCP_MAX_WITHIN_PAGE_LIMIT=4
+MARTEN_MCP_MAX_READ_CHARS=3000
+```
+
+Defaults shown above. Values are range-clamped.
+
+## Cache freshness TTL overrides
+
+Optional cache freshness overrides:
+
+```bash
+MARTEN_MCP_SOFT_TTL_MS=43200000
+MARTEN_MCP_HARD_TTL_MS=604800000
+```
+
+`MARTEN_MCP_HARD_TTL_MS` is clamped to be at least `MARTEN_MCP_SOFT_TTL_MS`.
+
 ## Telemetry
 
 Telemetry is enabled by default and written as daily JSONL files.

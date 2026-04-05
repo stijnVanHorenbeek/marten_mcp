@@ -1,895 +1,1035 @@
 import type {
-  ContextMode,
-  DocChunk,
-  HeadingSummary,
-  HybridIndexPersistedState,
-  PageSummary,
-  SearchMode,
-  SearchResult
+    ContextMode,
+    DocChunk,
+    HeadingSummary,
+    HybridIndexPersistedState,
+    PageSummary,
+    SearchMode,
+    SearchResult
 } from "./types.js";
 import { SEARCH_FIELD_WEIGHTS } from "./config.js";
 import {
-  includesPhraseCaseInsensitive,
-  normalizeWhitespace,
-  tokenize,
-  trigrams
+    includesPhraseCaseInsensitive,
+    normalizeWhitespace,
+    tokenize,
+    trigrams
 } from "./util.js";
 
 interface IndexedChunk {
-  chunk: DocChunk;
-  lexicalTerms: string[];
-  lexicalTermFrequency: Map<string, number>;
-  lexicalLength: number;
-  trigramTerms: string[];
+    chunk: DocChunk;
+    lexicalTerms: string[];
+    lexicalTermFrequency: Map<string, number>;
+    lexicalLength: number;
+    trigramTerms: string[];
 }
 
 interface ScoredChunk {
-  chunk: DocChunk;
-  lexicalScore: number;
-  trigramScore: number;
-  score: number;
+    chunk: DocChunk;
+    lexicalScore: number;
+    trigramScore: number;
+    score: number;
 }
 
 interface QueryProfile {
-  raw: string;
-  lexicalTerms: string[];
-  trigramTerms: string[];
-  identifierTerms: string[];
-  queryClass: SearchMode;
-  symbolHeavy: boolean;
-  shortQuery: boolean;
+    raw: string;
+    lexicalTerms: string[];
+    trigramTerms: string[];
+    identifierTerms: string[];
+    queryClass: SearchMode;
+    symbolHeavy: boolean;
+    shortQuery: boolean;
+}
+
+export interface QueryProfileInspection {
+    queryClass: SearchMode;
+    lexicalTerms: string[];
+    identifierTerms: string[];
+    suppressedTerms: string[];
+    shortQuery: boolean;
+    symbolHeavy: boolean;
+}
+
+interface BuiltQueryProfile {
+    profile: QueryProfile;
+    suppressedTerms: string[];
 }
 
 const QUERY_STOPWORDS = new Set([
-  "in",
-  "review",
-  "please",
-  "and",
-  "for",
-  "the",
-  "this",
-  "with",
-  "how",
-  "what",
-  "when",
-  "why",
-  "where",
-  "should",
-  "would",
-  "could",
-  "into"
+    "in",
+    "review",
+    "please",
+    "and",
+    "for",
+    "the",
+    "this",
+    "with",
+    "how",
+    "what",
+    "when",
+    "why",
+    "where",
+    "should",
+    "would",
+    "could",
+    "into",
+    "validate",
+    "validated",
+    "finding",
+    "findings",
+    "recommendation",
+    "recommendations",
+    "ranked",
+    "impact",
+    "usage",
+    "only"
+]);
+
+const QUERY_META_TERMS = new Set([
+    "signature",
+    "signatures",
+    "overload",
+    "overloads",
+    "param",
+    "params",
+    "parameter",
+    "parameters",
+    "argument",
+    "arguments",
+    "returns",
+    "return",
+    "missing",
+    "null"
+]);
+
+const LOW_VALUE_IDENTIFIER_TERMS = new Set([
+    "cancellationtoken",
+    "cancellation",
+    "token"
 ]);
 
 export class HybridIndex {
-  private readonly chunks: DocChunk[];
-  private readonly byId: Map<string, DocChunk>;
-  private readonly chunksByPath: Map<string, DocChunk[]>;
-  private readonly lexicalPostings: Map<string, Set<string>>;
-  private readonly trigramPostings: Map<string, Set<string>>;
-  private readonly preIndexed: Map<string, IndexedChunk>;
-  private readonly lexicalDocFrequencies: Map<string, number>;
-  private avgLexicalDocLength: number;
+    private readonly chunks: DocChunk[];
+    private readonly byId: Map<string, DocChunk>;
+    private readonly chunksByPath: Map<string, DocChunk[]>;
+    private readonly lexicalPostings: Map<string, Set<string>>;
+    private readonly trigramPostings: Map<string, Set<string>>;
+    private readonly preIndexed: Map<string, IndexedChunk>;
+    private readonly lexicalDocFrequencies: Map<string, number>;
+    private avgLexicalDocLength: number;
 
-  public constructor(chunks: DocChunk[], persistedState?: HybridIndexPersistedState | null) {
-    this.chunks = chunks;
-    this.byId = new Map(chunks.map((x) => [x.id, x]));
-    this.chunksByPath = new Map();
-    this.lexicalPostings = new Map();
-    this.trigramPostings = new Map();
-    this.preIndexed = new Map();
-    this.lexicalDocFrequencies = new Map();
-    this.avgLexicalDocLength = 0;
+    public constructor(chunks: DocChunk[], persistedState?: HybridIndexPersistedState | null) {
+        this.chunks = chunks;
+        this.byId = new Map(chunks.map((x) => [x.id, x]));
+        this.chunksByPath = new Map();
+        this.lexicalPostings = new Map();
+        this.trigramPostings = new Map();
+        this.preIndexed = new Map();
+        this.lexicalDocFrequencies = new Map();
+        this.avgLexicalDocLength = 0;
 
-    const hydrated = persistedState ? this.hydrateFromPersistedState(persistedState) : false;
-    if (!hydrated) {
-      this.build();
-      return;
-    }
-
-    this.buildChunksByPath();
-  }
-
-  public search(query: string, limit: number, mode: SearchMode = "auto", debug = false, offset = 0): SearchResult[] {
-    return this.searchInternal(query, limit, mode, debug, offset, null, true);
-  }
-
-  public searchWithinPage(
-    path: string,
-    query: string,
-    limit: number,
-    mode: SearchMode = "auto",
-    debug = false,
-    offset = 0
-  ): SearchResult[] {
-    return this.searchInternal(query, limit, mode, debug, offset, path, false);
-  }
-
-  private searchInternal(
-    query: string,
-    limit: number,
-    mode: SearchMode,
-    debug: boolean,
-    offset: number,
-    pathScope: string | null,
-    dedupePaths: boolean
-  ): SearchResult[] {
-    const profile = buildQueryProfile(query);
-    const trimmedQuery = profile.raw;
-    const shortQuery = profile.shortQuery;
-    const symbolHeavy = profile.symbolHeavy;
-    const flexiblePhraseMatch = symbolHeavy || shortQuery;
-    const queryKind = profile.queryClass;
-    const useHybridAuto = mode === "auto" && !shortQuery;
-    const decidedMode = mode === "auto" ? (shortQuery ? "exact" : "auto") : mode;
-    const lexicalTerms = profile.lexicalTerms;
-    const trigramTerms = profile.trigramTerms;
-    const identifierTerms = profile.identifierTerms;
-    const normalizedPathScope = pathScope ? pathScope.trim() : "";
-    const hasPathScope = normalizedPathScope.length > 0;
-
-    const lexicalCandidates = this.collectCandidates(this.lexicalPostings, lexicalTerms);
-    const trigramCandidates = this.collectCandidates(this.trigramPostings, trigramTerms);
-    const lexicalTermHitCount = lexicalTerms.reduce((count, term) => count + (this.lexicalPostings.has(term) ? 1 : 0), 0);
-    const lexicalTermCoverage = lexicalTerms.length > 0 ? lexicalTermHitCount / lexicalTerms.length : 1;
-    const candidateIds = new Set<string>();
-
-    if (useHybridAuto) {
-      lexicalCandidates.forEach((id) => candidateIds.add(id));
-      trigramCandidates.forEach((id) => candidateIds.add(id));
-    } else if (decidedMode === "lexical") {
-      lexicalCandidates.forEach((id) => candidateIds.add(id));
-    } else if (decidedMode === "trigram") {
-      trigramCandidates.forEach((id) => candidateIds.add(id));
-    } else if (decidedMode === "exact") {
-      this.chunks.forEach((chunk) => {
-        if (isExactMatchCandidate(chunk, trimmedQuery, flexiblePhraseMatch)) {
-          candidateIds.add(chunk.id);
+        const hydrated = persistedState ? this.hydrateFromPersistedState(persistedState) : false;
+        if (!hydrated) {
+            this.build();
+            return;
         }
-      });
-    } else {
-      lexicalCandidates.forEach((id) => candidateIds.add(id));
-      trigramCandidates.forEach((id) => candidateIds.add(id));
+
+        this.buildChunksByPath();
     }
 
-    const scoredById = new Map<
-      string,
-      {
-        chunk: DocChunk;
-        lexicalScore: number;
-        trigramScore: number;
-        phraseBoost: number;
-        codeBoost: number;
-      }
-    >();
-
-    for (const id of candidateIds) {
-      const indexed = this.preIndexed.get(id);
-      if (!indexed) {
-        continue;
-      }
-
-      const lexicalScore =
-        this.scoreLexical(indexed, lexicalTerms) + termOverlapBoost(indexed.chunk, lexicalTerms, SEARCH_FIELD_WEIGHTS);
-      const trigramScore = scoreTrigram(indexed.chunk, indexed.trigramTerms, trigramTerms, trimmedQuery);
-      const queryIsCode = queryKind === "trigram";
-      const phraseBoost = exactPhraseBoost(
-        indexed.chunk,
-        trimmedQuery,
-        queryIsCode,
-        SEARCH_FIELD_WEIGHTS,
-        flexiblePhraseMatch
-      );
-
-      const codeBoost =
-        queryIsCode &&
-        indexed.chunk.code_text.length > 0 &&
-        includesPhraseFlexible(indexed.chunk.code_text, trimmedQuery, flexiblePhraseMatch)
-          ? Math.min(0.35, SEARCH_FIELD_WEIGHTS.code * 0.6)
-          : 0;
-
-      if (hasPathScope && indexed.chunk.path !== normalizedPathScope) {
-        continue;
-      }
-
-      scoredById.set(id, {
-        chunk: indexed.chunk,
-        lexicalScore,
-        trigramScore,
-        phraseBoost,
-        codeBoost
-      });
+    public search(query: string, limit: number, mode: SearchMode = "auto", debug = false, offset = 0): SearchResult[] {
+        return this.searchInternal(query, limit, mode, debug, offset, null, true);
     }
 
-    const lexicalRank = rankByScore(scoredById, (row) => row.lexicalScore + row.phraseBoost * 0.35 + row.codeBoost * 0.15);
-    const trigramRank = rankByScore(scoredById, (row) => row.trigramScore + row.phraseBoost * 0.2 + row.codeBoost * 0.3);
-    let maxLexicalEvidence = 0;
-    let maxTrigramEvidence = 0;
-    for (const row of scoredById.values()) {
-      maxLexicalEvidence = Math.max(maxLexicalEvidence, row.lexicalScore);
-      maxTrigramEvidence = Math.max(maxTrigramEvidence, row.trigramScore);
+    public searchWithinPage(
+        path: string,
+        query: string,
+        limit: number,
+        mode: SearchMode = "auto",
+        debug = false,
+        offset = 0
+    ): SearchResult[] {
+        return this.searchInternal(query, limit, mode, debug, offset, path, false);
     }
-    const lexicalEvidenceAbsent = lexicalCandidates.size === 0;
-    const lexicalEvidenceWeak = lexicalCandidates.size > 0 && maxLexicalEvidence < 0.12;
-    const trigramEvidenceStrong = trigramCandidates.size > 0 && maxTrigramEvidence >= 0.45;
-    const typoLikeLexicalQuery =
-      queryKind === "lexical" && lexicalTerms.length >= 2 && lexicalTerms.length <= 6 && lexicalTermCoverage < 0.7;
-    const preferTrigramAutoBlend =
-      useHybridAuto && (typoLikeLexicalQuery || (trigramEvidenceStrong && (lexicalEvidenceAbsent || lexicalEvidenceWeak)));
-    const preferLexicalAutoBlend =
-      useHybridAuto &&
-      !preferTrigramAutoBlend &&
-      !symbolHeavy &&
-      lexicalTermCoverage >= 0.7 &&
-      maxLexicalEvidence >= 0.2;
-    const scored: ScoredChunk[] = [];
 
-    for (const [id, row] of scoredById.entries()) {
-      let score = 0;
+    private searchInternal(
+        query: string,
+        limit: number,
+        mode: SearchMode,
+        debug: boolean,
+        offset: number,
+        pathScope: string | null,
+        dedupePaths: boolean
+    ): SearchResult[] {
+        const profile = buildQueryProfile(query);
+        const trimmedQuery = profile.raw;
+        const shortQuery = profile.shortQuery;
+        const symbolHeavy = profile.symbolHeavy;
+        const flexiblePhraseMatch = symbolHeavy || shortQuery;
+        const queryKind = profile.queryClass;
+        const useHybridAuto = mode === "auto" && !shortQuery;
+        const decidedMode = mode === "auto" ? (shortQuery ? "exact" : "auto") : mode;
+        const lexicalTerms = profile.lexicalTerms;
+        const trigramTerms = profile.trigramTerms;
+        const identifierTerms = profile.identifierTerms;
+        const normalizedPathScope = pathScope ? pathScope.trim() : "";
+        const hasPathScope = normalizedPathScope.length > 0;
 
-      if (decidedMode === "lexical") {
-        score = row.lexicalScore + row.phraseBoost + row.codeBoost;
-      } else if (decidedMode === "trigram") {
-        score = row.trigramScore + row.phraseBoost * 0.5 + row.codeBoost;
-      } else if (decidedMode === "exact") {
-        score = isExactMatchCandidate(row.chunk, trimmedQuery, flexiblePhraseMatch) ? 1 + row.phraseBoost : 0;
-      } else {
-        const lexicalWeight = preferTrigramAutoBlend
-          ? 0.2
-          : preferLexicalAutoBlend
-            ? 0.85
-            : queryKind === "lexical"
-              ? 0.72
-              : 0.45;
-        const trigramWeight = preferTrigramAutoBlend
-          ? 0.8
-          : preferLexicalAutoBlend
-            ? 0.15
-            : queryKind === "lexical"
-              ? 0.28
-              : 0.55;
-        const normalizedLexical = maxLexicalEvidence > 0 ? row.lexicalScore / maxLexicalEvidence : 0;
-        const normalizedTrigram = maxTrigramEvidence > 0 ? row.trigramScore / maxTrigramEvidence : 0;
-        const rankBlend =
-          lexicalWeight * reciprocalRank(lexicalRank.get(id)) + trigramWeight * reciprocalRank(trigramRank.get(id));
-        score =
-          lexicalWeight * normalizedLexical +
-          trigramWeight * normalizedTrigram +
-          rankBlend * 0.12 +
-          row.phraseBoost * 0.4 +
-          row.codeBoost;
-      }
+        const lexicalCandidates = this.collectCandidates(this.lexicalPostings, lexicalTerms);
+        const trigramCandidates = this.collectCandidates(this.trigramPostings, trigramTerms);
+        const lexicalTermHitCount = lexicalTerms.reduce((count, term) => count + (this.lexicalPostings.has(term) ? 1 : 0), 0);
+        const lexicalTermCoverage = lexicalTerms.length > 0 ? lexicalTermHitCount / lexicalTerms.length : 1;
+        const candidateIds = new Set<string>();
 
-      score += identifierFieldBoost(row.chunk, identifierTerms);
-      score += identifierEvidenceAdjustment(row.chunk, identifierTerms);
-      score += genericDocsPenalty(row.chunk, identifierTerms, lexicalTerms);
+        if (useHybridAuto) {
+            lexicalCandidates.forEach((id) => candidateIds.add(id));
+            trigramCandidates.forEach((id) => candidateIds.add(id));
+        } else if (decidedMode === "lexical") {
+            lexicalCandidates.forEach((id) => candidateIds.add(id));
+        } else if (decidedMode === "trigram") {
+            trigramCandidates.forEach((id) => candidateIds.add(id));
+        } else if (decidedMode === "exact") {
+            this.chunks.forEach((chunk) => {
+                if (isExactMatchCandidate(chunk, trimmedQuery, flexiblePhraseMatch)) {
+                    candidateIds.add(chunk.id);
+                }
+            });
+        } else {
+            lexicalCandidates.forEach((id) => candidateIds.add(id));
+            trigramCandidates.forEach((id) => candidateIds.add(id));
+        }
 
-      if (score > 0) {
-        scored.push({
-          chunk: row.chunk,
-          lexicalScore: row.lexicalScore,
-          trigramScore: row.trigramScore,
-          score
+        const scoredById = new Map<
+            string,
+            {
+                chunk: DocChunk;
+                lexicalScore: number;
+                trigramScore: number;
+                phraseBoost: number;
+                codeBoost: number;
+            }
+        >();
+
+        for (const id of candidateIds) {
+            const indexed = this.preIndexed.get(id);
+            if (!indexed) {
+                continue;
+            }
+
+            const lexicalScore =
+                this.scoreLexical(indexed, lexicalTerms) + termOverlapBoost(indexed.chunk, lexicalTerms, SEARCH_FIELD_WEIGHTS);
+            const trigramScore = scoreTrigram(indexed.chunk, indexed.trigramTerms, trigramTerms, trimmedQuery);
+            const queryIsCode = queryKind === "trigram";
+            const phraseBoost = exactPhraseBoost(
+                indexed.chunk,
+                trimmedQuery,
+                queryIsCode,
+                SEARCH_FIELD_WEIGHTS,
+                flexiblePhraseMatch
+            );
+
+            const codeBoost =
+                queryIsCode &&
+                    indexed.chunk.code_text.length > 0 &&
+                    includesPhraseFlexible(indexed.chunk.code_text, trimmedQuery, flexiblePhraseMatch)
+                    ? Math.min(0.35, SEARCH_FIELD_WEIGHTS.code * 0.6)
+                    : 0;
+
+            if (hasPathScope && indexed.chunk.path !== normalizedPathScope) {
+                continue;
+            }
+
+            scoredById.set(id, {
+                chunk: indexed.chunk,
+                lexicalScore,
+                trigramScore,
+                phraseBoost,
+                codeBoost
+            });
+        }
+
+        const lexicalRank = rankByScore(scoredById, (row) => row.lexicalScore + row.phraseBoost * 0.35 + row.codeBoost * 0.15);
+        const trigramRank = rankByScore(scoredById, (row) => row.trigramScore + row.phraseBoost * 0.2 + row.codeBoost * 0.3);
+        let maxLexicalEvidence = 0;
+        let maxTrigramEvidence = 0;
+        for (const row of scoredById.values()) {
+            maxLexicalEvidence = Math.max(maxLexicalEvidence, row.lexicalScore);
+            maxTrigramEvidence = Math.max(maxTrigramEvidence, row.trigramScore);
+        }
+        const lexicalEvidenceAbsent = lexicalCandidates.size === 0;
+        const lexicalEvidenceWeak = lexicalCandidates.size > 0 && maxLexicalEvidence < 0.12;
+        const trigramEvidenceStrong = trigramCandidates.size > 0 && maxTrigramEvidence >= 0.45;
+        const typoLikeLexicalQuery =
+            queryKind === "lexical" && lexicalTerms.length >= 2 && lexicalTerms.length <= 6 && lexicalTermCoverage < 0.7;
+        const preferTrigramAutoBlend =
+            useHybridAuto && (typoLikeLexicalQuery || (trigramEvidenceStrong && (lexicalEvidenceAbsent || lexicalEvidenceWeak)));
+        const preferLexicalAutoBlend =
+            useHybridAuto &&
+            !preferTrigramAutoBlend &&
+            !symbolHeavy &&
+            lexicalTermCoverage >= 0.7 &&
+            maxLexicalEvidence >= 0.2;
+        const scored: ScoredChunk[] = [];
+
+        for (const [id, row] of scoredById.entries()) {
+            let score = 0;
+
+            if (decidedMode === "lexical") {
+                score = row.lexicalScore + row.phraseBoost + row.codeBoost;
+            } else if (decidedMode === "trigram") {
+                score = row.trigramScore + row.phraseBoost * 0.5 + row.codeBoost;
+            } else if (decidedMode === "exact") {
+                score = isExactMatchCandidate(row.chunk, trimmedQuery, flexiblePhraseMatch) ? 1 + row.phraseBoost : 0;
+            } else {
+                const lexicalWeight = preferTrigramAutoBlend
+                    ? 0.2
+                    : preferLexicalAutoBlend
+                        ? 0.85
+                        : queryKind === "lexical"
+                            ? 0.72
+                            : 0.45;
+                const trigramWeight = preferTrigramAutoBlend
+                    ? 0.8
+                    : preferLexicalAutoBlend
+                        ? 0.15
+                        : queryKind === "lexical"
+                            ? 0.28
+                            : 0.55;
+                const normalizedLexical = maxLexicalEvidence > 0 ? row.lexicalScore / maxLexicalEvidence : 0;
+                const normalizedTrigram = maxTrigramEvidence > 0 ? row.trigramScore / maxTrigramEvidence : 0;
+                const rankBlend =
+                    lexicalWeight * reciprocalRank(lexicalRank.get(id)) + trigramWeight * reciprocalRank(trigramRank.get(id));
+                score =
+                    lexicalWeight * normalizedLexical +
+                    trigramWeight * normalizedTrigram +
+                    rankBlend * 0.12 +
+                    row.phraseBoost * 0.4 +
+                    row.codeBoost;
+            }
+
+            score += identifierFieldBoost(row.chunk, identifierTerms);
+            score += identifierEvidenceAdjustment(row.chunk, identifierTerms);
+            score += genericDocsPenalty(row.chunk, identifierTerms, lexicalTerms);
+
+            if (score > 0) {
+                scored.push({
+                    chunk: row.chunk,
+                    lexicalScore: row.lexicalScore,
+                    trigramScore: row.trigramScore,
+                    score
+                });
+            }
+        }
+
+        scored.sort((a, b) => {
+            const byScore = b.score - a.score;
+            if (byScore !== 0) {
+                return byScore;
+            }
+
+            const byPath = a.chunk.path.localeCompare(b.chunk.path);
+            if (byPath !== 0) {
+                return byPath;
+            }
+
+            return a.chunk.id.localeCompare(b.chunk.id);
         });
-      }
+        const scoped = hasPathScope ? scored.filter((row) => row.chunk.path === normalizedPathScope) : scored;
+        const rankedRows = dedupePaths ? dedupeByPath(scoped) : scoped;
+        return rankedRows.slice(offset, offset + limit).map((row) => ({
+            id: row.chunk.id,
+            path: row.chunk.path,
+            title: row.chunk.title,
+            headings: row.chunk.headings,
+            score: round(row.score),
+            lexicalScore: round(row.lexicalScore),
+            trigramScore: round(row.trigramScore),
+            snippet: snippetFor(row.chunk, trimmedQuery),
+            debug: debug
+                ? {
+                    decidedMode,
+                    queryClass: queryKind,
+                    autoBlend: useHybridAuto,
+                    phraseBoost: round(
+                        exactPhraseBoost(row.chunk, trimmedQuery, queryKind === "trigram", SEARCH_FIELD_WEIGHTS, flexiblePhraseMatch)
+                    ),
+                    codeBoost:
+                        queryKind === "trigram" && includesPhraseFlexible(row.chunk.code_text, trimmedQuery, flexiblePhraseMatch)
+                            ? Math.min(0.35, SEARCH_FIELD_WEIGHTS.code * 0.6)
+                            : 0,
+                    shortQueryFallback: shortQuery
+                }
+                : undefined
+        }));
     }
 
-    scored.sort((a, b) => {
-      const byScore = b.score - a.score;
-      if (byScore !== 0) {
-        return byScore;
-      }
-
-      const byPath = a.chunk.path.localeCompare(b.chunk.path);
-      if (byPath !== 0) {
-        return byPath;
-      }
-
-      return a.chunk.id.localeCompare(b.chunk.id);
-    });
-    const scoped = hasPathScope ? scored.filter((row) => row.chunk.path === normalizedPathScope) : scored;
-    const rankedRows = dedupePaths ? dedupeByPath(scoped) : scoped;
-    return rankedRows.slice(offset, offset + limit).map((row) => ({
-      id: row.chunk.id,
-      path: row.chunk.path,
-      title: row.chunk.title,
-      headings: row.chunk.headings,
-      score: round(row.score),
-      lexicalScore: round(row.lexicalScore),
-      trigramScore: round(row.trigramScore),
-      snippet: snippetFor(row.chunk, trimmedQuery),
-      debug: debug
-        ? {
-            decidedMode,
-            queryClass: queryKind,
-            autoBlend: useHybridAuto,
-            phraseBoost: round(
-              exactPhraseBoost(row.chunk, trimmedQuery, queryKind === "trigram", SEARCH_FIELD_WEIGHTS, flexiblePhraseMatch)
-            ),
-            codeBoost:
-              queryKind === "trigram" && includesPhraseFlexible(row.chunk.code_text, trimmedQuery, flexiblePhraseMatch)
-                ? Math.min(0.35, SEARCH_FIELD_WEIGHTS.code * 0.6)
-                : 0,
-            shortQueryFallback: shortQuery
-          }
-        : undefined
-    }));
-  }
-
-  public getById(id: string): DocChunk | undefined {
-    return this.byId.get(id);
-  }
-
-  public getContext(id: string, before: number, after: number, _mode: ContextMode = "section"): DocChunk[] {
-    const target = this.byId.get(id);
-    if (!target) {
-      return [];
+    public getById(id: string): DocChunk | undefined {
+        return this.byId.get(id);
     }
 
-    const pageChunks = this.chunksByPath.get(target.path) ?? [];
-    const targetHeadingKey = target.headings.join(" > ");
-    const sectionChunks = pageChunks.filter((chunk) => chunk.headings.join(" > ") === targetHeadingKey);
-    const scope = sectionChunks.length > 0 ? sectionChunks : pageChunks;
-
-    const idx = scope.findIndex((c) => c.id === id);
-    if (idx < 0) {
-      return [];
-    }
-
-    const start = Math.max(0, idx - before);
-    const end = Math.min(scope.length, idx + after + 1);
-    return scope.slice(start, end);
-  }
-
-  public getPage(path: string): DocChunk[] {
-    return this.chunksByPath.get(path) ?? [];
-  }
-
-  public listHeadings(path: string): HeadingSummary[] {
-    const page = this.getPage(path);
-    const byHeading = new Map<string, HeadingSummary>();
-
-    for (const chunk of page) {
-      const headingKey = chunk.headings.join(" > ");
-      const existing = byHeading.get(headingKey);
-      if (existing) {
-        existing.chunkCount += 1;
-        continue;
-      }
-
-      byHeading.set(headingKey, {
-        headingKey,
-        headings: [...chunk.headings],
-        firstChunkId: chunk.id,
-        chunkCount: 1
-      });
-    }
-
-    return Array.from(byHeading.values());
-  }
-
-  public listPages(prefix: string, limit: number): PageSummary[] {
-    const normalizedPrefix = prefix.trim().toLowerCase();
-    const pages: PageSummary[] = [];
-
-    for (const [path, chunks] of this.chunksByPath.entries()) {
-      if (normalizedPrefix && !path.toLowerCase().startsWith(normalizedPrefix)) {
-        continue;
-      }
-
-      pages.push({
-        path,
-        title: chunks[0]?.title ?? "Marten Docs",
-        chunkCount: chunks.length
-      });
-    }
-
-    pages.sort((a, b) => a.path.localeCompare(b.path));
-    return pages.slice(0, limit);
-  }
-
-  public chunkCount(): number {
-    return this.chunks.length;
-  }
-
-  public pageCount(): number {
-    return this.chunksByPath.size;
-  }
-
-  private build(): void {
-    for (const chunk of this.chunks) {
-      const lexicalSource = `${chunk.title}\n${chunk.headings.join(" ")}\n${chunk.path}\n${chunk.body_text}`;
-      const trigramSource = `${chunk.title}\n${chunk.headings.join(" ")}\n${chunk.path}\n${chunk.body_text}\n${chunk.code_text}`;
-
-      const lexicalTerms = tokenize(lexicalSource);
-      const trigramTerms = trigrams(trigramSource);
-
-      this.preIndexed.set(chunk.id, {
-        chunk,
-        lexicalTerms,
-        lexicalTermFrequency: countTerms(lexicalTerms),
-        lexicalLength: lexicalTerms.length,
-        trigramTerms
-      });
-
-      for (const term of lexicalTerms) {
-        let posting = this.lexicalPostings.get(term);
-        if (!posting) {
-          posting = new Set<string>();
-          this.lexicalPostings.set(term, posting);
-        }
-        posting.add(chunk.id);
-      }
-
-      for (const tri of trigramTerms) {
-        let posting = this.trigramPostings.get(tri);
-        if (!posting) {
-          posting = new Set<string>();
-          this.trigramPostings.set(tri, posting);
-        }
-        posting.add(chunk.id);
-      }
-
-    }
-
-    let totalLength = 0;
-    for (const indexed of this.preIndexed.values()) {
-      totalLength += indexed.lexicalLength;
-    }
-    this.avgLexicalDocLength = this.preIndexed.size > 0 ? totalLength / this.preIndexed.size : 0;
-
-    for (const [term, posting] of this.lexicalPostings.entries()) {
-      this.lexicalDocFrequencies.set(term, posting.size);
-    }
-
-    this.buildChunksByPath();
-  }
-
-  public toPersistedState(): HybridIndexPersistedState {
-    return {
-      lexicalPostings: Array.from(this.lexicalPostings.entries()).map(([term, ids]) => [term, Array.from(ids)]),
-      trigramPostings: Array.from(this.trigramPostings.entries()).map(([tri, ids]) => [tri, Array.from(ids)]),
-      preIndexed: Array.from(this.preIndexed.values()).map((entry) => ({
-        chunkId: entry.chunk.id,
-        lexicalTerms: entry.lexicalTerms,
-        lexicalTermFrequency: Array.from(entry.lexicalTermFrequency.entries()),
-        lexicalLength: entry.lexicalLength,
-        trigramTerms: entry.trigramTerms
-      })),
-      lexicalDocFrequencies: Array.from(this.lexicalDocFrequencies.entries()),
-      avgLexicalDocLength: this.avgLexicalDocLength
-    };
-  }
-
-  private hydrateFromPersistedState(state: HybridIndexPersistedState): boolean {
-    try {
-      for (const [term, ids] of state.lexicalPostings) {
-        this.lexicalPostings.set(term, new Set(ids));
-      }
-
-      for (const [tri, ids] of state.trigramPostings) {
-        this.trigramPostings.set(tri, new Set(ids));
-      }
-
-      for (const item of state.preIndexed) {
-        const chunk = this.byId.get(item.chunkId);
-        if (!chunk) {
-          return false;
+    public getContext(id: string, before: number, after: number, _mode: ContextMode = "section"): DocChunk[] {
+        const target = this.byId.get(id);
+        if (!target) {
+            return [];
         }
 
-        this.preIndexed.set(item.chunkId, {
-          chunk,
-          lexicalTerms: item.lexicalTerms,
-          lexicalTermFrequency: new Map(item.lexicalTermFrequency),
-          lexicalLength: item.lexicalLength,
-          trigramTerms: item.trigramTerms
-        });
-      }
+        const pageChunks = this.chunksByPath.get(target.path) ?? [];
+        const targetPageIndex = pageChunks.findIndex((chunk) => chunk.id === id);
+        if (targetPageIndex < 0) {
+            return [];
+        }
 
-      for (const [term, df] of state.lexicalDocFrequencies) {
-        this.lexicalDocFrequencies.set(term, df);
-      }
-      this.avgLexicalDocLength = state.avgLexicalDocLength;
+        const targetHeadingKey = target.headings.join(" > ");
+        const sectionChunks = pageChunks.filter((chunk) => chunk.headings.join(" > ") === targetHeadingKey);
+        const scope = sectionChunks.length > 0 ? sectionChunks : pageChunks;
 
-      if (this.preIndexed.size !== this.chunks.length) {
-        return false;
-      }
+        const idx = scope.findIndex((c) => c.id === id);
+        if (idx < 0) {
+            return [];
+        }
 
-      return true;
-    } catch {
-      return false;
-    }
-  }
+        const start = Math.max(0, idx - before);
+        const end = Math.min(scope.length, idx + after + 1);
+        const sectionWindow = scope.slice(start, end);
 
-  private buildChunksByPath(): void {
-    for (const chunk of this.chunks) {
-      let pathChunks = this.chunksByPath.get(chunk.path);
-      if (!pathChunks) {
-        pathChunks = [];
-        this.chunksByPath.set(chunk.path, pathChunks);
-      }
-      pathChunks.push(chunk);
-    }
+        const pageStart = Math.max(0, targetPageIndex - before);
+        const pageEnd = Math.min(pageChunks.length, targetPageIndex + after + 1);
+        const desiredCount = Math.max(0, pageEnd - pageStart);
+        const needsPageNeighborFill = sectionChunks.length <= 1 || sectionWindow.length < desiredCount;
+        if (!needsPageNeighborFill) {
+            return sectionWindow;
+        }
 
-    for (const chunks of this.chunksByPath.values()) {
-      chunks.sort((a, b) => a.pageOrder - b.pageOrder);
-    }
-  }
+        const chosen = new Map<string, DocChunk>(sectionWindow.map((chunk) => [chunk.id, chunk]));
+        for (let i = pageStart; i < pageEnd; i++) {
+            const candidate = pageChunks[i];
+            if (!candidate || chosen.has(candidate.id)) {
+                continue;
+            }
 
-  private scoreLexical(indexed: IndexedChunk, queryTerms: string[]): number {
-    if (queryTerms.length === 0 || indexed.lexicalLength === 0) {
-      return 0;
-    }
+            chosen.set(candidate.id, candidate);
+            if (chosen.size >= desiredCount) {
+                break;
+            }
+        }
 
-    const uniqueQueryTerms = Array.from(new Set(queryTerms));
-    const docCount = Math.max(this.preIndexed.size, 1);
-    const k1 = 1.2;
-    const b = 0.75;
-    const denomLength = this.avgLexicalDocLength > 0 ? this.avgLexicalDocLength : indexed.lexicalLength;
-
-    let score = 0;
-    for (const term of uniqueQueryTerms) {
-      const tf = indexed.lexicalTermFrequency.get(term) ?? 0;
-      if (tf === 0) {
-        continue;
-      }
-
-      const df = this.lexicalDocFrequencies.get(term) ?? 0;
-      const idf = Math.log(1 + (docCount - df + 0.5) / (df + 0.5));
-      const tfWeight = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (indexed.lexicalLength / denomLength)));
-      score += idf * tfWeight;
+        return Array.from(chosen.values()).sort((a, b) => a.pageOrder - b.pageOrder || a.id.localeCompare(b.id));
     }
 
-    return score / Math.max(uniqueQueryTerms.length, 1);
-  }
+    public getNeighbors(id: string, before = 1, after = 1): { before: DocChunk[]; after: DocChunk[] } {
+        const target = this.byId.get(id);
+        if (!target) {
+            return { before: [], after: [] };
+        }
 
-  private collectCandidates(postings: Map<string, Set<string>>, terms: string[]): Set<string> {
-    const out = new Set<string>();
-    for (const term of terms) {
-      const ids = postings.get(term);
-      if (!ids) {
-        continue;
-      }
-      ids.forEach((id) => out.add(id));
+        const pageChunks = this.chunksByPath.get(target.path) ?? [];
+        const idx = pageChunks.findIndex((chunk) => chunk.id === id);
+        if (idx < 0) {
+            return { before: [], after: [] };
+        }
+
+        const safeBefore = Math.max(0, before);
+        const safeAfter = Math.max(0, after);
+        const beforeStart = Math.max(0, idx - safeBefore);
+        const beforeChunks = pageChunks.slice(beforeStart, idx);
+        const afterChunks = pageChunks.slice(idx + 1, idx + 1 + safeAfter);
+
+        return {
+            before: beforeChunks,
+            after: afterChunks
+        };
     }
-    return out;
-  }
+
+    public getPage(path: string): DocChunk[] {
+        return this.chunksByPath.get(path) ?? [];
+    }
+
+    public listHeadings(path: string): HeadingSummary[] {
+        const page = this.getPage(path);
+        const byHeading = new Map<string, HeadingSummary>();
+
+        for (const chunk of page) {
+            const headingKey = chunk.headings.join(" > ");
+            const existing = byHeading.get(headingKey);
+            if (existing) {
+                existing.chunkCount += 1;
+                continue;
+            }
+
+            byHeading.set(headingKey, {
+                headingKey,
+                headings: [...chunk.headings],
+                firstChunkId: chunk.id,
+                chunkCount: 1
+            });
+        }
+
+        return Array.from(byHeading.values());
+    }
+
+    public listPages(prefix: string, limit: number): PageSummary[] {
+        const normalizedPrefix = prefix.trim().toLowerCase();
+        const pages: PageSummary[] = [];
+
+        for (const [path, chunks] of this.chunksByPath.entries()) {
+            if (normalizedPrefix && !path.toLowerCase().startsWith(normalizedPrefix)) {
+                continue;
+            }
+
+            pages.push({
+                path,
+                title: chunks[0]?.title ?? "Marten Docs",
+                chunkCount: chunks.length
+            });
+        }
+
+        pages.sort((a, b) => a.path.localeCompare(b.path));
+        return pages.slice(0, limit);
+    }
+
+    public chunkCount(): number {
+        return this.chunks.length;
+    }
+
+    public pageCount(): number {
+        return this.chunksByPath.size;
+    }
+
+    private build(): void {
+        for (const chunk of this.chunks) {
+            const lexicalSource = `${chunk.title}\n${chunk.headings.join(" ")}\n${chunk.path}\n${chunk.body_text}`;
+            const trigramSource = `${chunk.title}\n${chunk.headings.join(" ")}\n${chunk.path}\n${chunk.body_text}\n${chunk.code_text}`;
+
+            const lexicalTerms = tokenize(lexicalSource);
+            const trigramTerms = trigrams(trigramSource);
+
+            this.preIndexed.set(chunk.id, {
+                chunk,
+                lexicalTerms,
+                lexicalTermFrequency: countTerms(lexicalTerms),
+                lexicalLength: lexicalTerms.length,
+                trigramTerms
+            });
+
+            for (const term of lexicalTerms) {
+                let posting = this.lexicalPostings.get(term);
+                if (!posting) {
+                    posting = new Set<string>();
+                    this.lexicalPostings.set(term, posting);
+                }
+                posting.add(chunk.id);
+            }
+
+            for (const tri of trigramTerms) {
+                let posting = this.trigramPostings.get(tri);
+                if (!posting) {
+                    posting = new Set<string>();
+                    this.trigramPostings.set(tri, posting);
+                }
+                posting.add(chunk.id);
+            }
+
+        }
+
+        let totalLength = 0;
+        for (const indexed of this.preIndexed.values()) {
+            totalLength += indexed.lexicalLength;
+        }
+        this.avgLexicalDocLength = this.preIndexed.size > 0 ? totalLength / this.preIndexed.size : 0;
+
+        for (const [term, posting] of this.lexicalPostings.entries()) {
+            this.lexicalDocFrequencies.set(term, posting.size);
+        }
+
+        this.buildChunksByPath();
+    }
+
+    public toPersistedState(): HybridIndexPersistedState {
+        return {
+            lexicalPostings: Array.from(this.lexicalPostings.entries()).map(([term, ids]) => [term, Array.from(ids)]),
+            trigramPostings: Array.from(this.trigramPostings.entries()).map(([tri, ids]) => [tri, Array.from(ids)]),
+            preIndexed: Array.from(this.preIndexed.values()).map((entry) => ({
+                chunkId: entry.chunk.id,
+                lexicalTerms: entry.lexicalTerms,
+                lexicalTermFrequency: Array.from(entry.lexicalTermFrequency.entries()),
+                lexicalLength: entry.lexicalLength,
+                trigramTerms: entry.trigramTerms
+            })),
+            lexicalDocFrequencies: Array.from(this.lexicalDocFrequencies.entries()),
+            avgLexicalDocLength: this.avgLexicalDocLength
+        };
+    }
+
+    private hydrateFromPersistedState(state: HybridIndexPersistedState): boolean {
+        try {
+            for (const [term, ids] of state.lexicalPostings) {
+                this.lexicalPostings.set(term, new Set(ids));
+            }
+
+            for (const [tri, ids] of state.trigramPostings) {
+                this.trigramPostings.set(tri, new Set(ids));
+            }
+
+            for (const item of state.preIndexed) {
+                const chunk = this.byId.get(item.chunkId);
+                if (!chunk) {
+                    return false;
+                }
+
+                this.preIndexed.set(item.chunkId, {
+                    chunk,
+                    lexicalTerms: item.lexicalTerms,
+                    lexicalTermFrequency: new Map(item.lexicalTermFrequency),
+                    lexicalLength: item.lexicalLength,
+                    trigramTerms: item.trigramTerms
+                });
+            }
+
+            for (const [term, df] of state.lexicalDocFrequencies) {
+                this.lexicalDocFrequencies.set(term, df);
+            }
+            this.avgLexicalDocLength = state.avgLexicalDocLength;
+
+            if (this.preIndexed.size !== this.chunks.length) {
+                return false;
+            }
+
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    private buildChunksByPath(): void {
+        for (const chunk of this.chunks) {
+            let pathChunks = this.chunksByPath.get(chunk.path);
+            if (!pathChunks) {
+                pathChunks = [];
+                this.chunksByPath.set(chunk.path, pathChunks);
+            }
+            pathChunks.push(chunk);
+        }
+
+        for (const chunks of this.chunksByPath.values()) {
+            chunks.sort((a, b) => a.pageOrder - b.pageOrder);
+        }
+    }
+
+    private scoreLexical(indexed: IndexedChunk, queryTerms: string[]): number {
+        if (queryTerms.length === 0 || indexed.lexicalLength === 0) {
+            return 0;
+        }
+
+        const uniqueQueryTerms = Array.from(new Set(queryTerms));
+        const docCount = Math.max(this.preIndexed.size, 1);
+        const k1 = 1.2;
+        const b = 0.75;
+        const denomLength = this.avgLexicalDocLength > 0 ? this.avgLexicalDocLength : indexed.lexicalLength;
+
+        let score = 0;
+        for (const term of uniqueQueryTerms) {
+            const tf = indexed.lexicalTermFrequency.get(term) ?? 0;
+            if (tf === 0) {
+                continue;
+            }
+
+            const df = this.lexicalDocFrequencies.get(term) ?? 0;
+            const idf = Math.log(1 + (docCount - df + 0.5) / (df + 0.5));
+            const tfWeight = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (indexed.lexicalLength / denomLength)));
+            score += idf * tfWeight;
+        }
+
+        return score / Math.max(uniqueQueryTerms.length, 1);
+    }
+
+    private collectCandidates(postings: Map<string, Set<string>>, terms: string[]): Set<string> {
+        const out = new Set<string>();
+        for (const term of terms) {
+            const ids = postings.get(term);
+            if (!ids) {
+                continue;
+            }
+            ids.forEach((id) => out.add(id));
+        }
+        return out;
+    }
 }
 
 export function buildHybridIndexPersistedState(chunks: DocChunk[]): HybridIndexPersistedState {
-  const index = new HybridIndex(chunks);
-  return index.toPersistedState();
+    const index = new HybridIndex(chunks);
+    return index.toPersistedState();
 }
 
 function classifyQuery(query: string): SearchMode {
-  const terms = tokenize(query);
-  const symbolHeavy = isSymbolHeavyQuery(query);
-  if (terms.length >= 10 && !symbolHeavy) {
+    const terms = tokenize(query);
+    const symbolHeavy = isSymbolHeavyQuery(query);
+    if (terms.length >= 10 && !symbolHeavy) {
+        return "lexical";
+    }
+
+    const codeHints = /[<>{}().;:=\[\]`]/.test(query);
+    const pascalOrCamel = /[A-Za-z]+[A-Z][A-Za-z0-9]*/.test(query);
+    const hasNamespace = /[A-Za-z0-9_]+\.[A-Za-z0-9_]+/.test(query);
+    const hasGeneric = /<[A-Za-z0-9_,\s]+>/.test(query);
+    const hasMethodish = /\w+\s*\(.*\)/.test(query);
+
+    if (codeHints || pascalOrCamel || hasNamespace || hasGeneric || hasMethodish) {
+        return "trigram";
+    }
+
     return "lexical";
-  }
-
-  const codeHints = /[<>{}().;:=\[\]`]/.test(query);
-  const pascalOrCamel = /[A-Za-z]+[A-Z][A-Za-z0-9]*/.test(query);
-  const hasNamespace = /[A-Za-z0-9_]+\.[A-Za-z0-9_]+/.test(query);
-  const hasGeneric = /<[A-Za-z0-9_,\s]+>/.test(query);
-  const hasMethodish = /\w+\s*\(.*\)/.test(query);
-
-  if (codeHints || pascalOrCamel || hasNamespace || hasGeneric || hasMethodish) {
-    return "trigram";
-  }
-
-  return "lexical";
 }
 
 function scoreTrigram(chunk: DocChunk, chunkTerms: string[], queryTerms: string[], query: string): number {
-  if (queryTerms.length === 0) {
-    return 0;
-  }
-
-  const termSet = new Set(chunkTerms);
-  let matched = 0;
-  for (const t of queryTerms) {
-    if (termSet.has(t)) {
-      matched += 1;
+    if (queryTerms.length === 0) {
+        return 0;
     }
-  }
 
-  let score = matched / queryTerms.length;
-  if (includesPhraseCaseInsensitive(chunk.code_text, query)) {
-    score += Math.min(0.4, SEARCH_FIELD_WEIGHTS.code);
-  }
-  if (includesPhraseCaseInsensitive(chunk.raw_text, query)) {
-    score += Math.min(0.2, SEARCH_FIELD_WEIGHTS.body);
-  }
+    const termSet = new Set(chunkTerms);
+    let matched = 0;
+    for (const t of queryTerms) {
+        if (termSet.has(t)) {
+            matched += 1;
+        }
+    }
 
-  return Math.min(score, 1.5);
+    let score = matched / queryTerms.length;
+    if (includesPhraseCaseInsensitive(chunk.code_text, query)) {
+        score += Math.min(0.4, SEARCH_FIELD_WEIGHTS.code);
+    }
+    if (includesPhraseCaseInsensitive(chunk.raw_text, query)) {
+        score += Math.min(0.2, SEARCH_FIELD_WEIGHTS.body);
+    }
+
+    return Math.min(score, 1.5);
 }
 
 function termOverlapBoost(
-  chunk: DocChunk,
-  queryTerms: string[],
-  weights: { title: number; headings: number; path: number }
+    chunk: DocChunk,
+    queryTerms: string[],
+    weights: { title: number; headings: number; path: number }
 ): number {
-  if (queryTerms.length === 0) {
-    return 0;
-  }
-
-  const uniqueTerms = Array.from(new Set(queryTerms));
-  const titleTerms = new Set(tokenize(chunk.title));
-  const headingTerms = new Set(tokenize(chunk.headings.join(" ")));
-  const pathTerms = new Set(tokenize(chunk.path));
-
-  let titleMatches = 0;
-  let headingMatches = 0;
-  let pathMatches = 0;
-  for (const term of uniqueTerms) {
-    if (titleTerms.has(term)) {
-      titleMatches += 1;
+    if (queryTerms.length === 0) {
+        return 0;
     }
-    if (headingTerms.has(term)) {
-      headingMatches += 1;
-    }
-    if (pathTerms.has(term)) {
-      pathMatches += 1;
-    }
-  }
 
-  const denom = Math.max(uniqueTerms.length, 1);
-  const titleBoost = (titleMatches / denom) * Math.min(0.45, weights.title);
-  const headingBoost = (headingMatches / denom) * Math.min(0.35, weights.headings);
-  const pathBoost = (pathMatches / denom) * Math.min(0.3, weights.path);
-  return titleBoost + headingBoost + pathBoost;
+    const uniqueTerms = Array.from(new Set(queryTerms));
+    const titleTerms = new Set(tokenize(chunk.title));
+    const headingTerms = new Set(tokenize(chunk.headings.join(" ")));
+    const pathTerms = new Set(tokenize(chunk.path));
+
+    let titleMatches = 0;
+    let headingMatches = 0;
+    let pathMatches = 0;
+    for (const term of uniqueTerms) {
+        if (titleTerms.has(term)) {
+            titleMatches += 1;
+        }
+        if (headingTerms.has(term)) {
+            headingMatches += 1;
+        }
+        if (pathTerms.has(term)) {
+            pathMatches += 1;
+        }
+    }
+
+    const denom = Math.max(uniqueTerms.length, 1);
+    const titleBoost = (titleMatches / denom) * Math.min(0.45, weights.title);
+    const headingBoost = (headingMatches / denom) * Math.min(0.35, weights.headings);
+    const pathBoost = (pathMatches / denom) * Math.min(0.3, weights.path);
+    return titleBoost + headingBoost + pathBoost;
 }
 
 function snippetFor(chunk: DocChunk, query: string): string {
-  const raw = normalizeWhitespace(chunk.raw_text);
-  if (!query.trim()) {
-    return raw.slice(0, 200);
-  }
+    const raw = normalizeWhitespace(chunk.raw_text);
+    if (!query.trim()) {
+        return raw.slice(0, 200);
+    }
 
-  const lowerRaw = raw.toLowerCase();
-  const lowerQuery = query.toLowerCase();
-  const idx = lowerRaw.indexOf(lowerQuery);
-  if (idx < 0) {
-    return raw.slice(0, 200);
-  }
+    const lowerRaw = raw.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const idx = lowerRaw.indexOf(lowerQuery);
+    if (idx < 0) {
+        return raw.slice(0, 200);
+    }
 
-  const start = Math.max(0, idx - 80);
-  const end = Math.min(raw.length, idx + lowerQuery.length + 120);
-  return raw.slice(start, end);
+    const start = Math.max(0, idx - 80);
+    const end = Math.min(raw.length, idx + lowerQuery.length + 120);
+    return raw.slice(start, end);
 }
 
 function round(num: number): number {
-  return Math.round(num * 1000) / 1000;
+    return Math.round(num * 1000) / 1000;
 }
 
 function countTerms(terms: string[]): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const term of terms) {
-    out.set(term, (out.get(term) ?? 0) + 1);
-  }
-  return out;
+    const out = new Map<string, number>();
+    for (const term of terms) {
+        out.set(term, (out.get(term) ?? 0) + 1);
+    }
+    return out;
 }
 
 function isShortQuery(query: string): boolean {
-  if (!query) {
-    return false;
-  }
+    if (!query) {
+        return false;
+    }
 
-  if (query.length <= 3) {
-    return true;
-  }
+    if (query.length <= 3) {
+        return true;
+    }
 
-  const terms = tokenize(query);
-  return terms.length === 1 && terms[0].length <= 3;
+    const terms = tokenize(query);
+    return terms.length === 1 && terms[0].length <= 3;
 }
 
 function isSymbolHeavyQuery(query: string): boolean {
-  const symbols = query.replace(/[A-Za-z0-9\s]/g, "");
-  const compactLength = query.replace(/\s+/g, "").length;
-  if (compactLength === 0) {
-    return false;
-  }
+    const symbols = query.replace(/[A-Za-z0-9\s]/g, "");
+    const compactLength = query.replace(/\s+/g, "").length;
+    if (compactLength === 0) {
+        return false;
+    }
 
-  const ratio = symbols.length / compactLength;
-  return symbols.length >= 3 && ratio >= 0.08;
+    const ratio = symbols.length / compactLength;
+    return symbols.length >= 3 && ratio >= 0.08;
 }
 
 function isExactMatchCandidate(chunk: DocChunk, query: string, flexibleMatch: boolean): boolean {
-  return (
-    includesPhraseFlexible(chunk.title, query, flexibleMatch) ||
-    includesPhraseFlexible(chunk.path, query, flexibleMatch) ||
-    chunk.headings.some((heading) => includesPhraseFlexible(heading, query, flexibleMatch)) ||
-    includesPhraseFlexible(chunk.raw_text, query, flexibleMatch)
-  );
+    return (
+        includesPhraseFlexible(chunk.title, query, flexibleMatch) ||
+        includesPhraseFlexible(chunk.path, query, flexibleMatch) ||
+        chunk.headings.some((heading) => includesPhraseFlexible(heading, query, flexibleMatch)) ||
+        includesPhraseFlexible(chunk.raw_text, query, flexibleMatch)
+    );
 }
 
 function exactPhraseBoost(
-  chunk: DocChunk,
-  query: string,
-  queryIsCode: boolean,
-  weights: { title: number; headings: number; path: number; body: number; code: number },
-  flexibleMatch: boolean
+    chunk: DocChunk,
+    query: string,
+    queryIsCode: boolean,
+    weights: { title: number; headings: number; path: number; body: number; code: number },
+    flexibleMatch: boolean
 ): number {
-  if (!query) {
-    return 0;
-  }
+    if (!query) {
+        return 0;
+    }
 
-  let boost = 0;
-  if (includesPhraseFlexible(chunk.title, query, flexibleMatch)) {
-    boost += weights.title;
-  }
-  if (includesPhraseFlexible(chunk.path, query, flexibleMatch)) {
-    boost += weights.path;
-  }
-  if (chunk.headings.some((heading) => includesPhraseFlexible(heading, query, flexibleMatch))) {
-    boost += weights.headings;
-  }
-  if (includesPhraseFlexible(chunk.body_text, query, flexibleMatch)) {
-    boost += weights.body;
-  }
-  if (queryIsCode && includesPhraseFlexible(chunk.code_text, query, flexibleMatch)) {
-    boost += weights.code;
-  }
+    let boost = 0;
+    if (includesPhraseFlexible(chunk.title, query, flexibleMatch)) {
+        boost += weights.title;
+    }
+    if (includesPhraseFlexible(chunk.path, query, flexibleMatch)) {
+        boost += weights.path;
+    }
+    if (chunk.headings.some((heading) => includesPhraseFlexible(heading, query, flexibleMatch))) {
+        boost += weights.headings;
+    }
+    if (includesPhraseFlexible(chunk.body_text, query, flexibleMatch)) {
+        boost += weights.body;
+    }
+    if (queryIsCode && includesPhraseFlexible(chunk.code_text, query, flexibleMatch)) {
+        boost += weights.code;
+    }
 
-  return Math.min(boost, 1);
+    return Math.min(boost, 1);
 }
 
 function includesPhraseFlexible(haystack: string, query: string, flexibleMatch: boolean): boolean {
-  if (includesPhraseCaseInsensitive(haystack, query)) {
-    return true;
-  }
+    if (includesPhraseCaseInsensitive(haystack, query)) {
+        return true;
+    }
 
-  if (!flexibleMatch) {
-    return false;
-  }
+    if (!flexibleMatch) {
+        return false;
+    }
 
-  const normalizedHaystack = normalizeSymbolic(haystack);
-  const normalizedQuery = normalizeSymbolic(query);
-  if (!normalizedHaystack || !normalizedQuery) {
-    return false;
-  }
+    const normalizedHaystack = normalizeSymbolic(haystack);
+    const normalizedQuery = normalizeSymbolic(query);
+    if (!normalizedHaystack || !normalizedQuery) {
+        return false;
+    }
 
-  return normalizedHaystack.includes(normalizedQuery);
+    return normalizedHaystack.includes(normalizedQuery);
 }
 
 function normalizeSymbolic(input: string): string {
-  return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function buildQueryProfile(query: string): QueryProfile {
-  const raw = query.trim();
-  const cleaned = stripQueryNoise(raw);
-  const lexicalTerms = tokenize(cleaned);
-  const trigramTerms = trigrams(cleaned);
-  const identifierTerms = extractIdentifierTerms(raw);
-  return {
-    raw,
-    lexicalTerms,
-    trigramTerms,
-    identifierTerms,
-    queryClass: classifyQuery(raw),
-    symbolHeavy: isSymbolHeavyQuery(raw),
-    shortQuery: isShortQuery(raw)
-  };
+    return buildQueryProfileInternal(query).profile;
+}
+
+export function inspectQueryProfile(query: string): QueryProfileInspection {
+    const built = buildQueryProfileInternal(query);
+    return {
+        queryClass: built.profile.queryClass,
+        lexicalTerms: built.profile.lexicalTerms,
+        identifierTerms: built.profile.identifierTerms,
+        suppressedTerms: built.suppressedTerms,
+        shortQuery: built.profile.shortQuery,
+        symbolHeavy: built.profile.symbolHeavy
+    };
+}
+
+function buildQueryProfileInternal(query: string): BuiltQueryProfile {
+    const raw = query.trim();
+    const cleaned = stripQueryNoise(raw);
+    const lexicalBeforeSuppression = tokenize(cleaned);
+    const lexicalTerms = suppressLowValueTerms(lexicalBeforeSuppression);
+    const trigramTerms = trigrams(cleaned);
+    const identifierBeforeSuppression = extractIdentifierTerms(raw);
+    const identifierTerms = suppressLowValueTerms(identifierBeforeSuppression);
+    const suppressedTerms = Array.from(
+        new Set([
+            ...lexicalBeforeSuppression.filter((term) => !lexicalTerms.includes(term)),
+            ...identifierBeforeSuppression.filter((term) => !identifierTerms.includes(term))
+        ])
+    ).sort();
+
+    return {
+        profile: {
+            raw,
+            lexicalTerms,
+            trigramTerms,
+            identifierTerms,
+            queryClass: classifyQuery(raw),
+            symbolHeavy: isSymbolHeavyQuery(raw),
+            shortQuery: isShortQuery(raw)
+        },
+        suppressedTerms
+    };
 }
 
 function stripQueryNoise(query: string): string {
-  const terms = tokenize(query).filter((term) => !QUERY_STOPWORDS.has(term));
-  return terms.join(" ");
+    const terms = tokenize(query).filter((term) => !QUERY_STOPWORDS.has(term) && !QUERY_META_TERMS.has(term));
+    return terms.join(" ");
 }
 
 function extractIdentifierTerms(query: string): string[] {
-  const patterns = query.match(/[A-Za-z_][A-Za-z0-9_<>()\/.]*/g) ?? [];
-  const out = new Set<string>();
-  for (const token of patterns) {
-    const technicalLike =
-      token.includes(".") ||
-      token.includes("<") ||
-      token.includes("(") ||
-      token.includes("/") ||
-      /[a-z][A-Z]/.test(token) ||
-      /^I[A-Z]/.test(token) ||
-      /[A-Z].*[A-Z]/.test(token);
-    if (!technicalLike) {
-      continue;
+    const patterns = query.match(/[A-Za-z_][A-Za-z0-9_<>()\/.]*/g) ?? [];
+    const out = new Set<string>();
+    for (const token of patterns) {
+        const technicalLike =
+            token.includes(".") ||
+            token.includes("<") ||
+            token.includes("(") ||
+            token.includes("/") ||
+            /[a-z][A-Z]/.test(token) ||
+            /^I[A-Z]/.test(token) ||
+            /[A-Z].*[A-Z]/.test(token);
+        if (!technicalLike) {
+            continue;
+        }
+
+        tokenize(token)
+            .filter((term) => term.length >= 3)
+            .forEach((term) => out.add(term));
+        out.add(token.toLowerCase());
+    }
+    return Array.from(out);
+}
+
+function suppressLowValueTerms(terms: string[]): string[] {
+    if (terms.length === 0) {
+        return terms;
     }
 
-    tokenize(token)
-      .filter((term) => term.length >= 3)
-      .forEach((term) => out.add(term));
-    out.add(token.toLowerCase());
-  }
-  return Array.from(out);
+    const hasStrongerAnchor = terms.some((term) => !LOW_VALUE_IDENTIFIER_TERMS.has(term));
+    if (!hasStrongerAnchor) {
+        return terms;
+    }
+
+    return terms.filter((term) => !LOW_VALUE_IDENTIFIER_TERMS.has(term));
 }
 
 function rankByScore<T>(
-  scoredById: Map<string, T>,
-  scorer: (value: T) => number
+    scoredById: Map<string, T>,
+    scorer: (value: T) => number
 ): Map<string, number> {
-  const rows = Array.from(scoredById.entries()).map(([id, value]) => ({ id, score: scorer(value) }));
-  rows.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-  const rank = new Map<string, number>();
-  rows.forEach((row, index) => rank.set(row.id, index + 1));
-  return rank;
+    const rows = Array.from(scoredById.entries()).map(([id, value]) => ({ id, score: scorer(value) }));
+    rows.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+    const rank = new Map<string, number>();
+    rows.forEach((row, index) => rank.set(row.id, index + 1));
+    return rank;
 }
 
 function reciprocalRank(rank: number | undefined): number {
-  if (!rank) {
-    return 0;
-  }
-  const k = 60;
-  return 1 / (k + rank);
+    if (!rank) {
+        return 0;
+    }
+    const k = 60;
+    return 1 / (k + rank);
 }
 
 function identifierFieldBoost(chunk: DocChunk, identifierTerms: string[]): number {
-  if (identifierTerms.length === 0) {
-    return 0;
-  }
-
-  const haystacks = [chunk.title, chunk.path, chunk.headings.join(" "), chunk.code_text, chunk.raw_text];
-  let matches = 0;
-  for (const term of identifierTerms) {
-    if (haystacks.some((field) => field.toLowerCase().includes(term))) {
-      matches += 1;
+    if (identifierTerms.length === 0) {
+        return 0;
     }
-  }
 
-  return Math.min(0.5, (matches / identifierTerms.length) * 0.4);
+    const haystacks = [chunk.title, chunk.path, chunk.headings.join(" "), chunk.code_text, chunk.raw_text];
+    let matches = 0;
+    for (const term of identifierTerms) {
+        if (haystacks.some((field) => field.toLowerCase().includes(term))) {
+            matches += 1;
+        }
+    }
+
+    return Math.min(0.5, (matches / identifierTerms.length) * 0.4);
 }
 
 function identifierEvidenceAdjustment(chunk: DocChunk, identifierTerms: string[]): number {
-  if (identifierTerms.length < 2) {
-    return 0;
-  }
-
-  const haystack = `${chunk.title} ${chunk.path} ${chunk.headings.join(" ")} ${chunk.code_text} ${chunk.raw_text}`.toLowerCase();
-  let matches = 0;
-  for (const term of identifierTerms) {
-    if (haystack.includes(term)) {
-      matches += 1;
+    if (identifierTerms.length < 2) {
+        return 0;
     }
-  }
 
-  const ratio = matches / identifierTerms.length;
-  if (ratio >= 0.5) {
-    return 0.1;
-  }
+    const haystack = `${chunk.title} ${chunk.path} ${chunk.headings.join(" ")} ${chunk.code_text} ${chunk.raw_text}`.toLowerCase();
+    let matches = 0;
+    for (const term of identifierTerms) {
+        if (haystack.includes(term)) {
+            matches += 1;
+        }
+    }
 
-  if (ratio === 0) {
-    return -0.08;
-  }
+    const ratio = matches / identifierTerms.length;
+    if (ratio >= 0.5) {
+        return 0.1;
+    }
 
-  return 0;
+    if (ratio === 0) {
+        return -0.08;
+    }
+
+    return 0;
 }
 
 function genericDocsPenalty(chunk: DocChunk, identifierTerms: string[], lexicalTerms: string[]): number {
-  const path = chunk.path.toLowerCase();
-  const likelyGeneric =
-    path.includes("/getting-started") ||
-    path.includes("/migration-guide");
+    const path = chunk.path.toLowerCase();
+    const likelyGeneric =
+        path.includes("/getting-started") ||
+        path.includes("/migration-guide");
 
-  if (!likelyGeneric) {
-    return 0;
-  }
+    if (!likelyGeneric) {
+        return 0;
+    }
 
-  const hasStrongIdentifierHit = identifierTerms.some((term) => chunk.raw_text.toLowerCase().includes(term));
-  const hasTopicFocus = lexicalTerms.some((term) => chunk.path.toLowerCase().includes(term));
-  if (hasStrongIdentifierHit || hasTopicFocus) {
-    return 0;
-  }
+    const hasStrongIdentifierHit = identifierTerms.some((term) => chunk.raw_text.toLowerCase().includes(term));
+    const hasTopicFocus = lexicalTerms.some((term) => chunk.path.toLowerCase().includes(term));
+    if (hasStrongIdentifierHit || hasTopicFocus) {
+        return 0;
+    }
 
-  return identifierTerms.length > 0 ? -0.45 : -0.22;
+    return identifierTerms.length > 0 ? -0.45 : -0.22;
 }
 
 function dedupeByPath(rows: ScoredChunk[]): ScoredChunk[] {
-  const seen = new Set<string>();
-  const out: ScoredChunk[] = [];
-  for (const row of rows) {
-    if (seen.has(row.chunk.path)) {
-      continue;
+    const seen = new Set<string>();
+    const out: ScoredChunk[] = [];
+    for (const row of rows) {
+        if (seen.has(row.chunk.path)) {
+            continue;
+        }
+        seen.add(row.chunk.path);
+        out.push(row);
     }
-    seen.add(row.chunk.path);
-    out.push(row);
-  }
-  return out;
+    return out;
 }

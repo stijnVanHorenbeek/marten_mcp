@@ -153,6 +153,29 @@ Actual content.`;
     expect(joinedBody.includes("Actual content")).toBe(true);
   });
 
+  test("strips standalone thematic breaks from chunk body/raw fields", () => {
+    const raw = `--- url: /byid.md ---
+# Loading Documents by Id
+
+## Asynchronous Loading
+
+\`\`\`cs
+await session.LoadManyAsync<User>(ids);
+\`\`\`
+
+---`;
+
+    const pages = parsePagesWithDiagnostics(raw).pages;
+    const chunks = chunkPages(pages);
+    const asyncChunk = chunks.find((chunk) => chunk.headings.includes("Asynchronous Loading"));
+
+    expect(asyncChunk).toBeTruthy();
+    expect(asyncChunk?.body_text).toBe("");
+    expect(asyncChunk?.raw_text.endsWith("\n\n---")).toBe(false);
+    expect(asyncChunk?.raw_text.trim()).not.toBe("---");
+    expect(asyncChunk?.code_text.includes("LoadManyAsync")).toBe(true);
+  });
+
   test("parses admonitions and removes ::: wrappers from body text", () => {
     const raw = `--- url: /admonitions.md ---
 # Admonitions
