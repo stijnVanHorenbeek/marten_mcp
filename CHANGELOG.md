@@ -6,6 +6,21 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-04-05
+
+### Added
+- Added telemetry and trace tooling for run-level debugging with compact top-hit and read summaries (`trace:show`, `trace:analyze`) plus local inspectors (`inspect:chunk`, `inspect:query`).
+- Added shared script-side telemetry parser/path helpers for reuse across trace and mining workflows.
+
+### Changed
+- Simplified MCP retrieval contracts to a smaller, selection-oriented surface with compact outputs and no session/policy/guidance payloads.
+- `read_section` now returns one segment-centric read view with compact neighbors and default prose-first segment selection for clearer local progression on weaker models.
+- `read_context` local expansion now uses section-first scope with page-neighbor fill when section scope is too narrow.
+- Parser now strips standalone thematic-break boilerplate from chunk content fields to avoid orphan `---` residue.
+
+### Fixed
+- `list_headings` MCP output now returns schema-safe heading entries only, preventing additional-properties validation failures.
+
 ## [0.2.7] - 2026-04-04
 
 ### Added

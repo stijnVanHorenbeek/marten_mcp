@@ -1,6 +1,6 @@
 {
   "name": "marten-docs-mcp",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "type": "module",
   "description": "Local MCP server for MartenDB docs retrieval and search",
