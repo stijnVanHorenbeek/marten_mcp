@@ -7,14 +7,29 @@ const TELEMETRY_VERSION = 1;
 
 interface TelemetryBase {
   tool: string;
+  sessionId?: string;
   processId: number;
   seq: number;
   ts: string;
 }
 
+interface TelemetryInputBase {
+  sessionId?: string;
+}
+
+interface TelemetryTopResultSummary {
+  id: string;
+  path: string;
+  title: string;
+  score: number;
+}
+
 type TelemetryEventInput =
+  TelemetryInputBase &
+  (
   | {
       tool: "search_docs";
+      query?: string;
       queryTerms: string[];
       mode: string;
       limit: number;
@@ -22,13 +37,27 @@ type TelemetryEventInput =
       debug: boolean;
       count: number;
       topResultPaths: string[];
+      topResults?: TelemetryTopResultSummary[];
+      queryClass?: string;
+      lexicalTerms?: string[];
+      identifierTerms?: string[];
+      suppressedTerms?: string[];
     }
   | {
       tool: "read_section";
       id: string;
-      field: "raw_text" | "body_text" | "code_text";
+      requestedSegmentIndex: number | null;
+      resolvedSegmentIndex: number | null;
+      segmentKind: "heading" | "prose" | "code" | "admonition" | "image" | null;
       found: boolean;
       path: string | null;
+      offset?: number;
+      maxChars?: number;
+      returnedChars?: number;
+      hasMore?: boolean;
+      preview?: string;
+      neighborChunkIds?: string[];
+      neighborChunkPaths?: string[];
     }
   | {
       tool: "read_context";
@@ -38,6 +67,9 @@ type TelemetryEventInput =
       contextMode: string;
       count: number;
       paths: string[];
+      chunkIds?: string[];
+      chunkPaths?: string[];
+      contextCharsRead?: number;
     }
   | {
       tool: "list_headings";
@@ -47,6 +79,7 @@ type TelemetryEventInput =
   | {
       tool: "search_within_page";
       path: string;
+      query?: string;
       queryTerms: string[];
       mode: string;
       limit: number;
@@ -54,10 +87,36 @@ type TelemetryEventInput =
       debug: boolean;
       count: number;
       topChunkIds: string[];
-    };
+      topResultPaths?: string[];
+      topResults?: TelemetryTopResultSummary[];
+      queryClass?: string;
+      lexicalTerms?: string[];
+      identifierTerms?: string[];
+      suppressedTerms?: string[];
+    }
+  | {
+      tool: "list_pages";
+      prefix: string;
+      limit: number;
+      count: number;
+    }
+  | {
+      tool: "get_status";
+      freshnessState: string;
+      chunkCount: number;
+      pageCount: number;
+    }
+  | {
+      tool: "refresh_docs";
+      force: boolean;
+      refreshed: boolean;
+      chunkCount: number;
+      freshnessState: string;
+    });
 
 interface SearchTelemetryEvent extends TelemetryBase {
   tool: "search_docs";
+  query?: string;
   queryTerms: string[];
   mode: string;
   limit: number;
@@ -65,14 +124,28 @@ interface SearchTelemetryEvent extends TelemetryBase {
   debug: boolean;
   count: number;
   topResultPaths: string[];
+  topResults?: TelemetryTopResultSummary[];
+  queryClass?: string;
+  lexicalTerms?: string[];
+  identifierTerms?: string[];
+  suppressedTerms?: string[];
 }
 
 interface ReadSectionTelemetryEvent extends TelemetryBase {
   tool: "read_section";
   id: string;
-  field: "raw_text" | "body_text" | "code_text";
+  requestedSegmentIndex: number | null;
+  resolvedSegmentIndex: number | null;
+  segmentKind: "heading" | "prose" | "code" | "admonition" | "image" | null;
   found: boolean;
   path: string | null;
+  offset?: number;
+  maxChars?: number;
+  returnedChars?: number;
+  hasMore?: boolean;
+  preview?: string;
+  neighborChunkIds?: string[];
+  neighborChunkPaths?: string[];
 }
 
 interface ReadContextTelemetryEvent extends TelemetryBase {
@@ -83,6 +156,9 @@ interface ReadContextTelemetryEvent extends TelemetryBase {
   contextMode: string;
   count: number;
   paths: string[];
+  chunkIds?: string[];
+  chunkPaths?: string[];
+  contextCharsRead?: number;
 }
 
 interface ListHeadingsTelemetryEvent extends TelemetryBase {
@@ -94,6 +170,7 @@ interface ListHeadingsTelemetryEvent extends TelemetryBase {
 interface SearchWithinPageTelemetryEvent extends TelemetryBase {
   tool: "search_within_page";
   path: string;
+  query?: string;
   queryTerms: string[];
   mode: string;
   limit: number;
@@ -101,6 +178,34 @@ interface SearchWithinPageTelemetryEvent extends TelemetryBase {
   debug: boolean;
   count: number;
   topChunkIds: string[];
+  topResultPaths?: string[];
+  topResults?: TelemetryTopResultSummary[];
+  queryClass?: string;
+  lexicalTerms?: string[];
+  identifierTerms?: string[];
+  suppressedTerms?: string[];
+}
+
+interface ListPagesTelemetryEvent extends TelemetryBase {
+  tool: "list_pages";
+  prefix: string;
+  limit: number;
+  count: number;
+}
+
+interface GetStatusTelemetryEvent extends TelemetryBase {
+  tool: "get_status";
+  freshnessState: string;
+  chunkCount: number;
+  pageCount: number;
+}
+
+interface RefreshDocsTelemetryEvent extends TelemetryBase {
+  tool: "refresh_docs";
+  force: boolean;
+  refreshed: boolean;
+  chunkCount: number;
+  freshnessState: string;
 }
 
 type TelemetryEvent =
@@ -108,7 +213,10 @@ type TelemetryEvent =
   | ReadSectionTelemetryEvent
   | ReadContextTelemetryEvent
   | ListHeadingsTelemetryEvent
-  | SearchWithinPageTelemetryEvent;
+  | SearchWithinPageTelemetryEvent
+  | ListPagesTelemetryEvent
+  | GetStatusTelemetryEvent
+  | RefreshDocsTelemetryEvent;
 
 interface TelemetryRecord {
   schema: "marten-mcp-telemetry";
@@ -236,6 +344,14 @@ export function createTelemetrySinkFromEnv(): TelemetrySink | null {
   const retentionDays = parseRetentionDays(process.env.MARTEN_MCP_TELEMETRY_RETENTION_DAYS);
   const defaultPath = path.join(resolveCachePaths().dir, "telemetry");
   return new TelemetrySink(path.resolve(target || defaultPath), retentionDays);
+}
+
+export function toTelemetryPreview(value: string, maxChars = 180): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxChars) {
+    return compact;
+  }
+  return `${compact.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 
 function parseRetentionDays(raw: string | undefined): number {

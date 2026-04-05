@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { chunkPages } from "../src/parser.js";
 import { HybridIndex } from "../src/indexer.js";
+import type { DocChunk } from "../src/types.js";
 
 describe("hybrid search", () => {
   test("finds code-like query with trigram behavior", () => {
@@ -66,58 +67,42 @@ describe("hybrid search", () => {
     expect(results[0]?.path).toBe("/events/projections/advanced-mapping.md");
   });
 
-  test("read context stays within same heading section when possible", () => {
-    const chunks = chunkPages([
-      {
-        path: "/events/aggregate-projections.md",
-        title: "Aggregate Projections",
-        raw: `# Aggregate Projections
-
-## Lifecycle
-
-Lifecycle text one.
-
-Lifecycle text two.
-
-## Configuration
-
-Configuration text.`
-      }
-    ]);
+  test("read context stays within same heading section when section has enough neighbors", () => {
+    const chunks: DocChunk[] = [
+      makeChunk("/events/aggregate-projections.md::0", ["Intro"], 0),
+      makeChunk("/events/aggregate-projections.md::1", ["Lifecycle"], 1),
+      makeChunk("/events/aggregate-projections.md::2", ["Lifecycle"], 2),
+      makeChunk("/events/aggregate-projections.md::3", ["Lifecycle"], 3),
+      makeChunk("/events/aggregate-projections.md::4", ["Configuration"], 4)
+    ];
 
     const index = new HybridIndex(chunks);
-    const lifecycleChunk = chunks.find((chunk) => chunk.headings.includes("Lifecycle"));
-    expect(lifecycleChunk).toBeTruthy();
+    const context = index.getContext("/events/aggregate-projections.md::2", 1, 1, "section");
 
-    const context = index.getContext(lifecycleChunk!.id, 3, 3);
-    expect(context.length).toBeGreaterThan(0);
-    expect(context.every((chunk) => chunk.headings.includes("Lifecycle"))).toBe(true);
+    expect(context.map((chunk) => chunk.id)).toEqual([
+      "/events/aggregate-projections.md::1",
+      "/events/aggregate-projections.md::2",
+      "/events/aggregate-projections.md::3"
+    ]);
   });
 
-  test("read context remains section-scoped", () => {
-    const chunks = chunkPages([
-      {
-        path: "/events/aggregate-projections.md",
-        title: "Aggregate Projections",
-        raw: `# Aggregate Projections
-
-## Lifecycle
-
-Lifecycle text one.
-
-## Configuration
-
-Configuration text.`
-      }
-    ]);
+  test("singleton subsection context pulls adjacent page neighbors", () => {
+    const chunks: DocChunk[] = [
+      makeChunk("/documents/querying/byid.md::0", ["Loading Documents by Id"], 0, "If missing, null is returned."),
+      makeChunk("/documents/querying/byid.md::1", ["Loading Documents by Id", "Synchronous Loading"], 1, "code sample"),
+      makeChunk("/documents/querying/byid.md::2", ["Loading Documents by Id", "Asynchronous Loading"], 2, "code sample")
+    ];
 
     const index = new HybridIndex(chunks);
-    const lifecycleChunk = chunks.find((chunk) => chunk.headings.includes("Lifecycle"));
-    expect(lifecycleChunk).toBeTruthy();
+    const context = index.getContext("/documents/querying/byid.md::1", 1, 1, "section");
 
-    const context = index.getContext(lifecycleChunk!.id, 10, 10, "section");
-    expect(context.length).toBeGreaterThan(0);
-    expect(context.some((chunk) => chunk.headings.includes("Configuration"))).toBe(false);
+    expect(context.map((chunk) => chunk.id)).toEqual([
+      "/documents/querying/byid.md::0",
+      "/documents/querying/byid.md::1",
+      "/documents/querying/byid.md::2"
+    ]);
+    expect(context.some((chunk) => chunk.id === "/documents/querying/byid.md::0")).toBe(true);
+    expect(new Set(context.map((chunk) => chunk.id)).size).toBe(context.length);
   });
 
   test("exact phrase boosts title and heading matches", () => {
@@ -391,4 +376,63 @@ Configuration text.`
     expect(results.length).toBeGreaterThan(0);
     expect(results[0]?.path).toBe("/documents/sessions.md");
   });
+
+  test("meta validation terms do not dominate lexical focus", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/aggregate-projections.md",
+        title: "Aggregate Projections",
+        raw: `# Aggregate Projections\n\nProjection lifecycle and daemon behavior.`
+      },
+      {
+        path: "/api/method-signatures.md",
+        title: "Method Signatures",
+        raw: `# Method Signatures\n\nSignature, params, returns and overload notes.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const query = "review aggregate projections signature overload params returns missing null";
+    const results = index.search(query, 3, "auto");
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]?.path).toBe("/events/aggregate-projections.md");
+  });
+
+  test("low-value framework identifiers do not outweigh stronger anchors", () => {
+    const chunks = chunkPages([
+      {
+        path: "/events/aggregate-projections.md",
+        title: "Aggregate Projections",
+        raw: `# Aggregate Projections\n\nUse async daemon projections and aggregate lifecycles.`
+      },
+      {
+        path: "/misc/cancellation-tokens.md",
+        title: "Cancellation Tokens",
+        raw: `# Cancellation Tokens\n\nCancellationToken examples and token propagation.`
+      }
+    ]);
+
+    const index = new HybridIndex(chunks);
+    const query = "aggregate projections lifecycle CancellationToken";
+    const results = index.search(query, 3, "auto");
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]?.path).toBe("/events/aggregate-projections.md");
+  });
 });
+
+function makeChunk(id: string, headings: string[], pageOrder: number, bodyText = "section body"): DocChunk {
+  const path = id.split("::")[0] ?? "/docs/page.md";
+  return {
+    id,
+    path,
+    title: "Test Page",
+    headings,
+    body_text: bodyText,
+    code_text: "",
+    raw_text: bodyText,
+    order: pageOrder,
+    pageOrder
+  };
+}

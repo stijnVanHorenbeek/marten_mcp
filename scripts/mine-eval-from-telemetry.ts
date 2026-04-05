@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { parseTelemetryLines, tsMs, type TelemetryEnvelope, type TelemetryEvent } from "./lib/telemetry-events.ts";
 
 export interface CliOptions {
   input: string;
@@ -11,52 +12,6 @@ export interface CliOptions {
   clusterSimilarity: number;
   clusterMinSharedTerms: number;
 }
-
-interface TelemetryEnvelope {
-  schema: string;
-  version: number;
-  event: TelemetryEvent;
-}
-
-type TelemetryEvent =
-  | {
-      tool: "search_docs";
-      processId: number;
-      seq: number;
-      ts: string;
-      queryTerms: string[];
-      topResultPaths: string[];
-    }
-  | {
-      tool: "read_section";
-      processId: number;
-      seq: number;
-      ts: string;
-      path: string | null;
-    }
-  | {
-      tool: "read_context";
-      processId: number;
-      seq: number;
-      ts: string;
-      paths: string[];
-    }
-  | {
-      tool: "search_within_page";
-      processId: number;
-      seq: number;
-      ts: string;
-      path: string;
-      queryTerms: string[];
-      topChunkIds: string[];
-    }
-  | {
-      tool: "list_headings";
-      processId: number;
-      seq: number;
-      ts: string;
-      path: string;
-    };
 
 interface SearchEvent {
   processId: number;
@@ -111,18 +66,7 @@ interface MineRunResult {
 
 export async function mineTelemetry(options: CliOptions): Promise<MineRunResult> {
   const lines = (await fs.readFile(options.input, "utf8")).split(/\r?\n/);
-  const events = lines
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map(parseEnvelope)
-    .filter((event): event is TelemetryEnvelope => event !== null)
-    .sort((a, b) => {
-      const tDiff = tsMs(a.event.ts) - tsMs(b.event.ts);
-      if (tDiff !== 0) {
-        return tDiff;
-      }
-      return a.event.seq - b.event.seq;
-    });
+  const events = parseTelemetryLines(lines);
 
   const recentSearches = new Map<number, SearchEvent[]>();
   const statsByCluster = new Map<string, QueryStats>();
@@ -131,13 +75,15 @@ export async function mineTelemetry(options: CliOptions): Promise<MineRunResult>
   for (const envelope of events) {
     const event = envelope.event;
     if (event.tool === "search_docs") {
-      const queryTerms = canonicalTerms(event.queryTerms.join(" "));
-      const representativeQuery = event.queryTerms.join(" ").trim();
+      const rawQueryTerms = Array.isArray(event.queryTerms) ? event.queryTerms : [];
+      const queryTerms = canonicalTerms(rawQueryTerms.join(" "));
+      const representativeQuery = rawQueryTerms.join(" ").trim();
       const clusterId = findOrCreateClusterId(representativeQuery, queryTerms, clusters, options);
       const stats = getOrCreateStats(statsByCluster, clusterId, representativeQuery);
       stats.searches += 1;
       stats.queryCounts.set(representativeQuery, (stats.queryCounts.get(representativeQuery) ?? 0) + 1);
-      const top1 = event.topResultPaths[0];
+      const topPaths = Array.isArray(event.topResultPaths) ? event.topResultPaths : [];
+      const top1 = topPaths[0];
       if (top1) {
         stats.top1PathCounts.set(top1, (stats.top1PathCounts.get(top1) ?? 0) + 1);
       }
@@ -148,7 +94,7 @@ export async function mineTelemetry(options: CliOptions): Promise<MineRunResult>
         tsMs: tsMs(event.ts),
         seq: event.seq,
         clusterId,
-        topResultPaths: new Set(event.topResultPaths)
+        topResultPaths: new Set(topPaths)
       });
       if (list.length > 40) {
         list.shift();
@@ -301,29 +247,14 @@ function parseArgs(args: string[]): CliOptions {
   return out;
 }
 
-function parseEnvelope(line: string): TelemetryEnvelope | null {
-  try {
-    const parsed = JSON.parse(line) as unknown;
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
-
-    const envelope = parsed as Partial<TelemetryEnvelope>;
-    if (envelope.schema !== "marten-mcp-telemetry" || !envelope.event || typeof envelope.event !== "object") {
-      return null;
-    }
-
-    return envelope as TelemetryEnvelope;
-  } catch {
-    return null;
-  }
-}
-
 function selectedPathsFromReadEvent(event: TelemetryEvent): string[] {
   if (event.tool === "read_section") {
     return event.path ? [event.path] : [];
   }
   if (event.tool === "read_context") {
+    if (Array.isArray(event.chunkPaths) && event.chunkPaths.length > 0) {
+      return event.chunkPaths;
+    }
     return event.paths ?? [];
   }
   if (event.tool === "search_within_page") {
@@ -535,14 +466,6 @@ function toFraction(input: string, fallback: number): number {
   const parsed = Number(input);
   if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) {
     return fallback;
-  }
-  return parsed;
-}
-
-function tsMs(value: string): number {
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) {
-    return 0;
   }
   return parsed;
 }

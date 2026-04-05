@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { detectRuntime, resolveCachePaths, resolveSqliteDriver, resolveStorageMode } from "./config.js";
+import { detectRuntime, resolveCachePaths, resolveRequestedStorageMode, resolveSqliteDriver, resolveStorageMode } from "./config.js";
 import { logWarn } from "./logger.js";
 import type {
   CacheMetadata,
@@ -30,7 +30,7 @@ export async function createDefaultStorage(): Promise<CacheStorage> {
     try {
       return await SqliteStorage.create(resolveCachePaths(), resolveSqliteDriver());
     } catch (error) {
-      const configuredMode = (process.env.MARTEN_MCP_STORAGE_MODE ?? "auto").toLowerCase();
+      const configuredMode = resolveRequestedStorageMode();
       if (configuredMode === "sqlite") {
         throw error;
       }
